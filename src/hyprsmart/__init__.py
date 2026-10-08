@@ -2,38 +2,35 @@ from io import BytesIO
 
 from PIL import Image
 
-from .window import capture_window, get_hyprland_windows
-import ollama
+from .window import capture_window
+from .w_getter import get_hyprland_active_window
+from .socket import listen_hyprland_socket, HyprEvent
+from .opacity import analyze_window_img, decide_opacity
+
+ANALYSIS_EVENTS = {
+    "activewindowv2",
+    "openwindow",
+    "windowtitlev2",
+    "fullscreen",
+    "changefloatingmode",
+}
+
+def handle_event(ev: HyprEvent):
+    print(ev)
+    if ev.kind in ANALYSIS_EVENTS:
+        win = get_hyprland_active_window()
+
+        if win is None:
+            return
+
+        img = capture_window(win)
+        state = analyze_window_img(img)
+
+        print(state)
+        # print("opacity:", decide_opacity(state))
+
+    print("done")
+
 
 def main() -> None:
-    wins = get_hyprland_windows()
-    images = [
-        capture_window(win) for win in wins
-    ]
-
-    for img_byte in images:
-
-        response = ollama.chat(
-        
-            model="qwen3.5:0.8b",
-            stream=False,
-            think=False,
-            messages=[{
-                "role": "user",
-                "content": """
-                Analyze this window screenshot.
-
-                Return JSON with:
-                - video: boolean
-                - text_density: number from 0 to 1
-                - visual_density: number from 0 to 1
-                - contrast: number from 0 to 1
-                """,
-                "images": [img_byte],
-            }],
-        )
-
-    print(response["message"]["content"])        
-
-    
-
+    listen_hyprland_socket(handle_event)
