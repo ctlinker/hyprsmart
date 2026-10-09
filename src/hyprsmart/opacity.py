@@ -1,5 +1,8 @@
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, asdict
+
 import ollama
+import yaml
 import json
 
 @dataclass
@@ -8,6 +11,14 @@ class VisualState:
     text_density: float
     visual_density: float
     contrast: float
+
+@dataclass
+class ParsedVisualState:
+    state: VisualState | None
+    raw: str
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 def decide_opacity(state: VisualState) -> float:
     if state.video:
@@ -21,7 +32,7 @@ def decide_opacity(state: VisualState) -> float:
 
     return 0.85
 
-def analyze_window_img(img_byte: bytes) -> str:
+def analyze_window_img(img_byte: bytes) -> ParsedVisualState:
     response = ollama.chat(
         model="qwen3.5:0.8b",
         stream=False,
@@ -31,11 +42,13 @@ def analyze_window_img(img_byte: bytes) -> str:
             "content": """
             Analyze this window screenshot.
 
-            Return JSON with:
-            - video: boolean
-            - text_density: number from 0 to 1
-            - visual_density: number from 0 to 1
-            - contrast: number from 0 to 1
+            Return YAML with:
+            ```yaml
+            video: boolean
+            text_density: number from 0 to 1
+            visual_density: number from 0 to 1
+            contrast: number from 0 to 1
+            ```
             """,
             "images": [img_byte],
         }],
@@ -43,4 +56,25 @@ def analyze_window_img(img_byte: bytes) -> str:
 
     data = response["message"]["content"]
 
-    return data
+    return _parse_visual_state(data)
+
+
+def _parse_yaml(raw: str) -> dict:
+    match = re.search(
+        r"```(?:yaml)?\s*\n(.*?)```",
+        raw,
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    content = match.group(1) if match else raw
+    return yaml.safe_load(content)
+
+def _parse_visual_state(raw: str) -> ParsedVisualState:
+    data = None
+
+    try:
+        data = _parse_yaml(raw)
+    except yaml.YAMLError:
+        print("[WARN] invalid yaml input passed to visual state parser")
+    
+    return ParsedVisualState(data, raw)

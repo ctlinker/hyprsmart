@@ -1,7 +1,13 @@
 import json
 import subprocess
 from collections.abc import Callable
-from .window import Window, window_from_hyprctl_json_string, window_from_hyprctl_json_dict
+
+from .window import (
+    Window,
+    window_from_hyprctl_json_dict,
+    window_from_hyprctl_json_string,
+)
+
 
 def _default_hyprland_filter_win(win: dict) -> bool:
     return not win["hidden"] and win["visible"]
