@@ -12,21 +12,23 @@ from .datacollect import save_sample
 
 CAPTURE_QUEUE = Queue()
 MODEL_QUEUE = Queue()
-ANALYSIS_EVENTS = {
-    "activewindowv2",
-    "openwindow",
-    "windowtitlev2",
-    "fullscreen",
-    "changefloatingmode",
+EVENT_DELAYS = {
+    "activewindowv2": 0.1,
+    "openwindow": 0.4,
+    "windowtitlev2": 0.3,
+    "fullscreen": 0.2,
+    "changefloatingmode": 0.2,
 }
 
 def handle_event(ev: HyprEvent):
-    print(ev)
-    if ev.kind in ANALYSIS_EVENTS:
-        print("handled")
-        Timer(schedule_capture(), 0.1).run()
-    else:
-        print("skipped")
+    delay = EVENT_DELAYS.get(ev.kind)
+
+    if delay is None:
+        print("skipped:", ev.kind)
+        return
+
+    print("handled:", ev.kind, "delay:", delay)
+    Timer(delay, schedule_capture).start()
     
 
 def schedule_capture():
@@ -44,6 +46,10 @@ def capture_worker():
         try:
             img = capture_window(win)
             MODEL_QUEUE.put((win, img))
+        
+        except Exception:
+            print("[WARN]Failed to capture window")
+
         finally:
             CAPTURE_QUEUE.task_done()
 
@@ -54,6 +60,10 @@ def model_worker():
         try:
             state = analyze_window_img(img)
             save_sample(win, img, state)
+        
+        except Exception:
+            print("[WARN]Failed to capture window")
+
         finally:
             MODEL_QUEUE.task_done()
 
