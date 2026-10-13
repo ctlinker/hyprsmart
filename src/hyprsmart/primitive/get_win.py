@@ -21,14 +21,17 @@ def get_hyprland_active_workspace_id() -> int:
 
     return json.loads(result.stdout)["id"]
 
-def get_hyprland_active_window() -> Window:
-    result = subprocess.run(
-        ["hyprctl", "activewindow", "-j"],
-        capture_output=True,
-        check=True,
-    )
-
-    return window_from_hyprctl_json_string(result.stdout)
+def get_hyprland_active_window() -> Window | None:
+    try:
+        result = subprocess.run(
+            ["hyprctl", "activewindow", "-j"],
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+        return window_from_hyprctl_json_string(result.stdout)
+    except Exception:
+        return None
 
 def _filter_hyprland_win_by_focused_workspace():
     workspace_id = get_hyprland_active_workspace_id()

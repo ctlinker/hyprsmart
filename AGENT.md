@@ -136,7 +136,13 @@ hyprsmart/
   uv run hyprsmart stop
   uv run hyprsmart reload
   ```
-- **Configuration des écrans** :
+- **Affichage des logs en direct** :
+  ```bash
+  uv run hyprsmart what-is-it-doing          # Affiche les 50 dernières lignes
+  uv run hyprsmart what-is-it-doing -w       # Suit les logs en temps réel (tail -f)
+  uv run hyprsmart what-is-it-doing -w -n 20 # 20 lignes initiales puis suivi temps réel
+  ```
+- **Configuration des écrans & statut** :
   ```bash
   uv run hyprsmart monitor --id 0 --use-wall "/chemin/vers/image.png"
   uv run hyprsmart status

@@ -31,6 +31,12 @@ from hyprsmart.opacity import clear_wallpaper_cache
 from hyprsmart.primitive import get_hyprland_monitors
 
 
+def get_log_file_path() -> Path:
+    log_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "hyprsmart"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / "hyprsmart.log"
+
+
 def is_daemon_running() -> int | None:
     """Check if the daemon is currently running, returning its PID if active."""
     pid_file = get_pid_file_path()
@@ -53,6 +59,12 @@ def is_daemon_running() -> int | None:
 
 def run_daemon_loop() -> None:
     """Run the HyprSmart daemon in the foreground."""
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except AttributeError:
+        pass
+
     pid = os.getpid()
     pid_file = get_pid_file_path()
     pid_file.write_text(str(pid))
@@ -134,20 +146,23 @@ def cmd_start(args: argparse.Namespace) -> None:
     if args.foreground:
         run_daemon_loop()
     else:
-        log_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "hyprsmart"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = open(log_dir / "hyprsmart.log", "a")
+        log_path = get_log_file_path()
+        log_file = open(log_path, "a", encoding="utf-8")
+
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
 
         proc = subprocess.Popen(
             [sys.executable, "-m", "hyprsmart", "start", "--foreground"],
             stdout=log_file,
             stderr=log_file,
+            env=env,
             start_new_session=True,
         )
         # Give it a moment to initialize
         time.sleep(0.3)
         print(f"[OK] HyprSmart daemon started in background (PID {proc.pid}).")
-        print(f"[INFO] Logs written to {log_dir / 'hyprsmart.log'}")
+        print(f"[INFO] Logs written to {log_path}")
 
 
 def cmd_stop(args: argparse.Namespace) -> None:
@@ -247,6 +262,44 @@ def cmd_status(args: argparse.Namespace) -> None:
             print(f"  - Monitor '{mon_key}': {wall_val}")
 
 
+def cmd_what_is_it_doing(args: argparse.Namespace) -> None:
+    log_path = get_log_file_path()
+    lines_to_show = max(1, args.lines)
+
+    if not log_path.exists():
+        if not args.watch:
+            print(f"[INFO] No logs found at {log_path}. (Start the daemon with 'hyprsmart start')")
+            return
+        print(f"[INFO] Waiting for logs to appear at {log_path}... (Press Ctrl+C to stop)")
+        try:
+            while not log_path.exists():
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            return
+
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            # Read existing lines
+            all_lines = f.readlines()
+            for line in all_lines[-lines_to_show:]:
+                sys.stdout.write(line)
+            sys.stdout.flush()
+
+            if not args.watch:
+                return
+
+            # Follow mode (tail -f)
+            while True:
+                line = f.readline()
+                if line:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+                else:
+                    time.sleep(0.1)
+    except KeyboardInterrupt:
+        pass
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="hyprsmart",
@@ -270,6 +323,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     # status
     subparsers.add_parser("status", help="Show daemon status and monitor configuration")
+
+    # what-is-it-doing
+    p_what = subparsers.add_parser(
+        "what-is-it-doing",
+        help="Echo daemon logs to the console",
+    )
+    p_what.add_argument(
+        "-w", "--watch",
+        action="store_true",
+        help="Keep watching and streaming logs in real time (like tail -f)",
+    )
+    p_what.add_argument(
+        "-n", "--lines",
+        type=int,
+        default=50,
+        help="Number of initial lines to display (default: 50)",
+    )
 
     # monitor
     p_mon = subparsers.add_parser("monitor", help="Configure wallpaper for a monitor")
@@ -299,6 +369,8 @@ def main() -> None:
         cmd_reload(args)
     elif args.subcommand == "status":
         cmd_status(args)
+    elif args.subcommand == "what-is-it-doing":
+        cmd_what_is_it_doing(args)
     elif args.subcommand == "monitor":
         cmd_monitor(args)
     else:

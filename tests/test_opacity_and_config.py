@@ -61,6 +61,12 @@ class TestHyprsmartCore(unittest.TestCase):
         lum = get_cached_wallpaper_luminance("/non/existent/wallpaper.png", 1920, 1080)
         self.assertEqual(lum.shape, (1080 // 4, 1920 // 4))
 
+    def test_window_parsing_safety(self):
+        from hyprsmart.primitive.window import window_from_hyprctl_json_dict
+        self.assertIsNone(window_from_hyprctl_json_dict({}))
+        self.assertIsNone(window_from_hyprctl_json_dict(None))
+        self.assertIsNone(window_from_hyprctl_json_dict({"address": "0x123"}))
+
 
 if __name__ == "__main__":
     unittest.main()
