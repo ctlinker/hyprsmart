@@ -1,20 +1,27 @@
 from dataclasses import dataclass
+from pathlib import Path
+import os
+from threading import Lock
 
 import numpy as np
 from PIL import Image
 
 from hyprsmart.primitive import Window
 
-# purspose : monitor resoltion downscale factor
+# monitor resolution downscale factor
 DOWN = 4
+
+# Cache for computed wallpaper luminance maps: (path, monitor_w, monitor_h, mtime) -> 2D numpy array
+WALLPAPER_CACHE: dict[tuple[str, int, int, float], np.ndarray] = {}
+WALLPAPER_CACHE_LOCK = Lock()
+
 
 def _luminance(rgb: np.ndarray) -> np.ndarray:
     """
     Convert an RGB image into a 2D array of relative luminance values.
 
     Each pixel's three RGB channels are converted into a single value
-    representing its relative brightness, using the WCAG sRGB luminance
-    formula.
+    representing its relative brightness, using the WCAG sRGB luminance formula.
 
     Args:
         rgb: NumPy array of shape (height, width, 3), containing RGB
@@ -22,54 +29,42 @@ def _luminance(rgb: np.ndarray) -> np.ndarray:
 
     Returns:
         A 2D NumPy array of shape (height, width), containing relative
-        luminance values in the range [0.0, 1.0], where 0.0 represents
-        black and 1.0 represents white.
-
-    Processing:
-        1. Normalize RGB values from [0, 255] to [0.0, 1.0].
-        2. Convert sRGB channel values to linear-light values.
-        3. Combine the linear RGB channels using WCAG luminance weights.
-
-    Reference:
-        WCAG 2.x — Relative luminance:
-        https://www.w3.org/TR/WCAG21/#dfn-relative-luminance
+        luminance values in the range [0.0, 1.0].
     """
     # Normalize RGB channel values to [0.0, 1.0].
     c = rgb / 255.0
 
     # Convert nonlinear sRGB values into linear-light values.
-    # The piecewise formula accounts for the sRGB transfer function.
     lin = np.where(
         c <= 0.04045,
         c / 12.92,
         ((c + 0.055) / 1.055) ** 2.4,
     )
 
-    # Combine the linear RGB channels into one luminance value per pixel.
-    # The weights reflect the relative contributions of each channel.
-    return lin @ np.array([0.2126, 0.7152, 0.0722])
-    
+    # Combine linear RGB channels using WCAG luminance weights.
+    return lin @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
 
-def load_wallpaper(path: str, monitor_h: int, monitor_w: int):
-    """
-    render a wallpaper in 'cover' mode, at reduced size,
-    And calculate it's WCAG relative luminance.
-    Call once per wallpaper/monitor change.
-    """
 
+def load_wallpaper(path: str, monitor_w: int, monitor_h: int) -> np.ndarray:
+    """
+    Render a wallpaper in 'cover' mode, at reduced size (scaled down by DOWN),
+    and calculate its WCAG relative luminance.
+    """
     img = Image.open(path).convert("RGB")
-    target_width = monitor_w // DOWN
-    target_height = monitor_h // DOWN
+    target_width = max(1, monitor_w // DOWN)
+    target_height = max(1, monitor_h // DOWN)
 
     tw_scale = target_width / img.width
     th_scale = target_height / img.height
     scale_fact = max(th_scale, tw_scale)
 
-    img = img.resize((
-        round(img.width * scale_fact), 
-        round(img.height * scale_fact)
-    ), Image.LANCZOS)
-
+    img = img.resize(
+        (
+            round(img.width * scale_fact),
+            round(img.height * scale_fact),
+        ),
+        Image.LANCZOS,
+    )
 
     left = (img.width - target_width) // 2
     top = (img.height - target_height) // 2
@@ -78,45 +73,92 @@ def load_wallpaper(path: str, monitor_h: int, monitor_w: int):
         left,
         top,
         left + target_width,
-        top + target_height
+        top + target_height,
     ))
 
     return _luminance(np.asarray(img, dtype=np.float32))
 
 
+def get_cached_wallpaper_luminance(
+    path: str | None,
+    monitor_w: int,
+    monitor_h: int,
+) -> np.ndarray:
+    """
+    Retrieve or compute wallpaper luminance map from cache.
+    Falls back to a default neutral luminance array if no wallpaper is specified or found.
+    """
+    target_w = max(1, monitor_w // DOWN)
+    target_h = max(1, monitor_h // DOWN)
+
+    if not path or not os.path.exists(path):
+        # Default neutral background luminance (0.2 dark wallpaper approximation)
+        return np.full((target_h, target_w), 0.2, dtype=np.float32)
+
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        mtime = 0.0
+
+    cache_key = (path, monitor_w, monitor_h, mtime)
+    with WALLPAPER_CACHE_LOCK:
+        cached = WALLPAPER_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+    try:
+        lum = load_wallpaper(path, monitor_w, monitor_h)
+        with WALLPAPER_CACHE_LOCK:
+            WALLPAPER_CACHE[cache_key] = lum
+        return lum
+    except Exception as e:
+        print(f"[WARN] Failed to load wallpaper from {path}: {e}")
+        return np.full((target_h, target_w), 0.2, dtype=np.float32)
+
+
+def clear_wallpaper_cache() -> None:
+    """Clear all cached wallpaper luminance matrices."""
+    with WALLPAPER_CACHE_LOCK:
+        WALLPAPER_CACHE.clear()
+
+
 @dataclass
 class Backdrop:
-    # Summarize a luminance map by considering 3 of it property
+    # Summarize a luminance map by considering 3 properties:
     p5: float   # brightness of the darkest spot
     p95: float  # brightness of the brightest spot
-    std: float  # how much brightness varies, low => calm or flat, high => busy
+    std: float  # variance in brightness (low => uniform, high => busy)
+
 
 def backdrop_behind(
-    lum: np.ndarray, 
-    win: Window, 
-    monitor_x: int, 
-    monitor_y: int
-)-> Backdrop:
+    lum: np.ndarray,
+    win: Window,
+    monitor_x: int,
+    monitor_y: int,
+) -> Backdrop:
     """
-    This function extracts the exact region of 
-    the monitor behind the passed window. This region is
-    then mapped it against the luminance represention of 
-    the monitor's wallpaper (the lum arg). Finely the 
-    function returns the `Backdrop` of that mapped luminance region.
+    Extract the exact region of the monitor behind the passed window.
+    Maps it against the luminance representation of the monitor's wallpaper,
+    then returns the Backdrop properties for that region.
     """
-    x0 = max(0, (win.x - monitor_x) // DOWN)
-    y0 = max(0, (win.y - monitor_y) // DOWN)
-    x1 = max(
-        lum.shape[1], 
-        (win.x - monitor_x + win.width) // DOWN
-    )
-    y1 = max(
-        lum.shape[0], 
-        (win.y - monitor_y + win.height) // DOWN
-    )
-    region = lum[x0:x1, y0:y1]
+    h, w = lum.shape
+    x0 = max(0, min(w, int((win.x - monitor_x) // DOWN)))
+    y0 = max(0, min(h, int((win.y - monitor_y) // DOWN)))
+    x1 = max(0, min(w, int((win.x - monitor_x + win.width) // DOWN)))
+    y1 = max(0, min(h, int((win.y - monitor_y + win.height) // DOWN)))
 
+    if x1 <= x0 or y1 <= y0:
+        return Backdrop(p5=0.5, p95=0.5, std=0.0)
+
+    # Note: NumPy indexing is [rows, columns] -> [y, x]
+    region = lum[y0:y1, x0:x1]
+
+    if region.size == 0:
+        return Backdrop(p5=0.5, p95=0.5, std=0.0)
+
+    p5, p95 = np.percentile(region, [5, 95])
     return Backdrop(
-        *np.percentile(region, [5, 95]), 
-        float(region.std())
+        p5=float(p5),
+        p95=float(p95),
+        std=float(region.std()),
     )

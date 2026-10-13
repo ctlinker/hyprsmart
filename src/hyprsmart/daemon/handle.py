@@ -1,11 +1,12 @@
-from queue import Queue
-from threading import Thread, Timer
+from queue import Queue, Empty
+from threading import Thread, Timer, Event, Lock
 from time import time
 
+from hyprsmart.config import get_current_config
 from hyprsmart.opacity import (
     backdrop_behind,
     decide_opacity,
-    load_wallpaper,
+    get_cached_wallpaper_luminance,
     window_colors,
 )
 from hyprsmart.primitive import (
@@ -15,7 +16,7 @@ from hyprsmart.primitive import (
     set_hyprland_win_opacity,
 )
 
-from .cache import cache_drop, cache_get, cache_put
+from .cache import cache_drop, cache_get, cache_put, cache_clear
 from .socket import HyprEvent
 
 CAPTURE_QUEUE = Queue()
@@ -29,10 +30,35 @@ EVENT_DELAYS: dict[str, float] = {
     "activewindowv2": 0.3,
     "windowtitlev2": 0.4,
     "fullscreen": 0.2,
-    "openwindow": 2,
+    "openwindow": 1.5,
 }
 
-def debounce_ev(kind: str)-> bool:
+MANAGED_WINDOWS: set[str] = set()
+MANAGED_LOCK = Lock()
+
+STOP_EVENT = Event()
+
+
+def record_managed_window(address: str) -> None:
+    with MANAGED_LOCK:
+        MANAGED_WINDOWS.add(address)
+
+
+def restore_all_managed_windows() -> None:
+    """Reset opacity to 1.0 for all windows managed by HyprSmart."""
+    with MANAGED_LOCK:
+        addresses = list(MANAGED_WINDOWS)
+        MANAGED_WINDOWS.clear()
+
+    for addr in addresses:
+        try:
+            set_hyprland_win_opacity(addr, 1.0, 1.0)
+            print(f"[INFO] Restored window opacity for {addr}")
+        except Exception as e:
+            print(f"[WARN] Failed to restore opacity for {addr}: {e}")
+
+
+def debounce_ev(kind: str) -> bool:
     debounced = DEBOUNCE_STORE.get(kind)
     curr_time = time()
 
@@ -40,101 +66,143 @@ def debounce_ev(kind: str)-> bool:
         DEBOUNCE_STORE[kind] = curr_time
         return True
 
-    if curr_time - debounced < DEBOUNCE_INTERVAL:
+    cfg = get_current_config()
+    interval = cfg.debounce_interval if cfg else DEBOUNCE_INTERVAL
+
+    if curr_time - debounced < interval:
         return False
-    
+
     DEBOUNCE_STORE[kind] = curr_time
     return True
 
-def handle_event(ev: HyprEvent)-> None:
+
+def handle_event(ev: HyprEvent) -> None:
+    if STOP_EVENT.is_set():
+        return
+
     if not debounce_ev(ev.kind):
-        print(f"debounced: {ev.kind}")
         return
 
     delay = EVENT_DELAYS.get(ev.kind)
     if delay is None:
-        print(f"skipped: {ev.kind}")
         return
 
     if ev.kind in ["openwindow", "windowtitlev2"]:
         Timer(delay, force_schedule_capture).start()
-    
-    if ev.kind == "activewindowv2":
+    elif ev.kind == "activewindowv2":
         Timer(delay, schedule_capture).start()
-    
-    print(f"handled: {ev.kind}")
 
-    
-def force_schedule_capture():
-    schedule_capture(True)
 
-def schedule_capture(force=False):
+def force_schedule_capture() -> None:
+    schedule_capture(force=True)
+
+
+def schedule_capture(force: bool = False) -> None:
+    if STOP_EVENT.is_set():
+        return
     win = get_hyprland_active_window()
     if win is None:
         return
     if not force and (e := cache_get(win)):
-        CACHE_HIT_QUEUE.put((win, e))   # saute la capture, va direct au calcul
+        CACHE_HIT_QUEUE.put((win, e))
         return
     CAPTURE_QUEUE.put(win)
 
-def capture_worker():
-    while True:
-        win = CAPTURE_QUEUE.get()
+
+def capture_worker() -> None:
+    while not STOP_EVENT.is_set():
+        try:
+            win = CAPTURE_QUEUE.get(timeout=1.0)
+        except Empty:
+            continue
+
         try:
             img = capture_window(win)
             LUMINANCE_QUEUE.put((win, img))
         except Exception:
-            print("[WARN]Failed to capture window")
+            print("[WARN] Failed to capture window")
         finally:
             CAPTURE_QUEUE.task_done()
 
-def cache_hit_worker():
-    while True:
-        win, w_entry = CACHE_HIT_QUEUE.get()
-        mon = get_hyprland_active_monitor()
-        if mon is None:
+
+def cache_hit_worker() -> None:
+    while not STOP_EVENT.is_set():
+        try:
+            win, w_entry = CACHE_HIT_QUEUE.get(timeout=1.0)
+        except Empty:
             continue
 
-        wallpaper_lum = load_wallpaper(
-            "/home/char-c/Pictures/Wallpapers/red-flower-field-live-wallpaper.gif", 
-            mon.width, 
-            mon.height
-        )
+        try:
+            mon = get_hyprland_active_monitor()
+            if mon is None:
+                continue
 
-        b = backdrop_behind(wallpaper_lum, win, mon.x, mon.y)
-        alpha = decide_opacity(w_entry.text_l, w_entry.bg_l, b)
-        print(f"decided: {alpha}, {win.address}")
-        set_hyprland_win_opacity(win.address, alpha, alpha)
-        CACHE_HIT_QUEUE.task_done()
+            cfg = get_current_config()
+            wall_path = cfg.get_wallpaper(mon.name, mon.id)
+            wallpaper_lum = get_cached_wallpaper_luminance(wall_path, mon.width, mon.height)
 
-def luminance_worker():
-    while True:
-        
-        mon = get_hyprland_active_monitor()
-        if mon is None:
+            b = backdrop_behind(wallpaper_lum, win, mon.x, mon.y)
+            alpha = decide_opacity(
+                w_entry.text_l,
+                w_entry.bg_l,
+                b,
+                target=cfg.target_contrast,
+                floor=cfg.floor_opacity,
+            )
+            print(f"[DECIDE] (cache hit) alpha: {alpha:.2f} for {win.address}")
+            set_hyprland_win_opacity(win.address, alpha, alpha)
+            record_managed_window(win.address)
+        except Exception as e:
+            print(f"[WARN] Error in cache_hit_worker: {e}")
+        finally:
+            CACHE_HIT_QUEUE.task_done()
+
+
+def luminance_worker() -> None:
+    while not STOP_EVENT.is_set():
+        try:
+            win, img = LUMINANCE_QUEUE.get(timeout=1.0)
+        except Empty:
             continue
 
-        win, img = LUMINANCE_QUEUE.get()
-        text_l, bg_l = window_colors(img)
-        cache_put(win, text_l, bg_l)
+        try:
+            mon = get_hyprland_active_monitor()
+            if mon is None:
+                continue
 
-        wallpaper_lum = load_wallpaper(
-            "/home/char-c/Pictures/Wallpapers/red-flower-field-live-wallpaper.gif", 
-            mon.width, 
-            mon.height
-        )
+            text_l, bg_l = window_colors(img)
+            cache_put(win, text_l, bg_l)
 
-        b = backdrop_behind(wallpaper_lum, win, mon.x, mon.y)
-        alpha = decide_opacity(text_l, bg_l, b)
-        print(f"decided: {alpha}, {win.address}")
-        set_hyprland_win_opacity(win.address, alpha, alpha)
-        LUMINANCE_QUEUE.task_done()
+            cfg = get_current_config()
+            wall_path = cfg.get_wallpaper(mon.name, mon.id)
+            wallpaper_lum = get_cached_wallpaper_luminance(wall_path, mon.width, mon.height)
 
-def load_hyprsmart_daemons():
+            b = backdrop_behind(wallpaper_lum, win, mon.x, mon.y)
+            alpha = decide_opacity(
+                text_l,
+                bg_l,
+                b,
+                target=cfg.target_contrast,
+                floor=cfg.floor_opacity,
+            )
+            print(f"[DECIDE] alpha: {alpha:.2f} for {win.address}")
+            set_hyprland_win_opacity(win.address, alpha, alpha)
+            record_managed_window(win.address)
+        except Exception as e:
+            print(f"[WARN] Error in luminance_worker: {e}")
+        finally:
+            LUMINANCE_QUEUE.task_done()
+
+
+def load_hyprsmart_daemons() -> None:
+    STOP_EVENT.clear()
     Thread(target=capture_worker, daemon=True).start()
     Thread(target=cache_hit_worker, daemon=True).start()
-    Thread(target=luminance_worker, daemon=True).start()   
-    print("starting hyprsmart")
+    Thread(target=luminance_worker, daemon=True).start()
+    print("[INFO] Started HyprSmart workers")
     Timer(0.5, schedule_capture).start()
 
 
+def stop_hyprsmart_daemons() -> None:
+    STOP_EVENT.set()
+    restore_all_managed_windows()

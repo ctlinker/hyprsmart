@@ -78,14 +78,18 @@ hyprsmart/
 ├── src/
 │   └── hyprsmart/
 │       ├── __init__.py       # Point d'entrée principal (hyprsmart:main)
+│       ├── __main__.py       # Exécution via python -m hyprsmart
+│       ├── cli.py            # Interface CLI (start, stop, reload, status, monitor)
+│       ├── config.py         # Gestion configuration (~/.config/hyprsmart/config.yaml)
 │       ├── daemon/           # Orchestration des événements & threads
 │       │   ├── __init__.py
 │       │   ├── cache.py      # Cache mémoire des métadonnées de fenêtres (TTL 30s)
+│       │   ├── control_server.py # Serveur IPC Unix socket pour commandes CLI
 │       │   ├── handle.py     # Debounce, files de traitement et workers
 │       │   └── socket.py     # Client socket UNIX Hyprland (.socket2.sock)
 │       ├── opacity/          # Moteur mathématique de contraste & WCAG
 │       │   ├── __init__.py
-│       │   ├── backdrop.py   # Rendu wallpaper & échantillonnage de luminance
+│       │   ├── backdrop.py   # Rendu wallpaper, cache de luminance & échantillonnage
 │       │   ├── compute.py    # Détermination de l'opacité selon le ratio WCAG
 │       │   └── win_col.py    # Détection des couleurs fenêtre (fond dominant & texte)
 │       └── primitive/        # Wrappers système de bas niveau
@@ -93,6 +97,7 @@ hyprsmart/
 │           ├── get_mon.py    # État des moniteurs (hyprctl monitors -j)
 │           ├── get_win.py    # Fenêtre active et liste clients (hyprctl -j)
 │           └── window.py     # Dataclass Window, grim, hyprctl dispatch opacity
+├── tests/                    # Tests unitaires du moteur (unittest)
 ├── wiki/
 │   └── reports/              # RAPPORTS DE SESSION OBLIGATOIRES (1 par requête)
 ├── AGENT.md                  # Ce guide
@@ -102,39 +107,43 @@ hyprsmart/
 
 ---
 
-## 5. Feuille de Route : Du POC au MVP Stabilisé
+## 5. Feuille de Route : Avancement
 
-Pour faire évoluer ce POC vers une version stable et publiable, les chantiers prioritaires sont :
-
-1. **Phase 1 : Nettoyage & Correction des Bugs Critiques**
-   - Corriger le slicing et le clamping des coordonnées dans `backdrop.py` (`lum[y0:y1, x0:x1]` avec `min(...)`).
-   - Mettre en cache la matrice de luminance du wallpaper pour ne pas recharger le fichier à chaque événement.
-   - Sécuriser le parsing des lignes du socket dans `socket.py` (`split(">>", 1)` avec vérification).
-
-2. **Phase 2 : Configuration & Détection du Wallpaper**
-   - Externaliser la configuration (fichier `~/.config/hyprsmart/config.toml`).
-   - Implémenter des adaptateurs pour détecter le fond d'écran actif (`hyprpaper`, `swww`, `waypaper`, ou capture directe du background via `grim`).
-
-3. **Phase 3 : Robustesse & Ergonomie Daemon**
-   - Reconnexion automatique du socket UNIX si le serveur se ferme.
-   - Interception de `SIGINT`/`SIGTERM` pour réinitialiser l'opacité de toutes les fenêtres à 1.0 (ou leur valeur par défaut).
-   - Ajout d'une suite de tests unitaires (pytest) pour le calcul de contraste et les fonctions pures.
+- [x] **Stabilisation du Moteur (Terminé)** :
+  - Slicing matriciel NumPy corrigé dans `backdrop.py` (`lum[y0:y1, x0:x1]` avec clamping).
+  - Cache en mémoire de la luminance des wallpapers (évite les recalculs LANCZOS/WCAG répétés).
+  - Robustesse du socket Hyprland (auto-reconnexion, tolérance aux lignes malformées).
+- [x] **Contrôle & Configuration (Terminé)** :
+  - Configuration YAML (`~/.config/hyprsmart/config.yaml`).
+  - Serveur de contrôle IPC sur UNIX Domain Socket (`$XDG_RUNTIME_DIR/hyprsmart/control.sock`).
+  - Commandes CLI : `start`, `stop`, `reload`, `status`, `monitor --id <id> --use-wall <path>`.
+  - Restauration de l'opacité à 1.0 à l'arrêt du démon.
+- [ ] **Évolutions Futures** :
+  - Détection automatique du fond d'écran via `hyprpaper`, `swww` ou `waypaper`.
+  - Prise en compte du z-order pour les fenêtres superposées (multi-tuiles/flottantes).
 
 ---
 
 ## 6. Commandes et Environnement
 
-- **Lancement** :
+- **Démarrage du démon** :
   ```bash
-  uv run hyprsmart
+  uv run hyprsmart start           # En arrière-plan
+  uv run hyprsmart start -f        # Au premier plan (debug)
   ```
-- **Vérification d'import** :
+- **Arrêt et rechargement** :
   ```bash
-  uv run python -c "import hyprsmart; print('OK')"
+  uv run hyprsmart stop
+  uv run hyprsmart reload
   ```
-- **Ajout de paquets** :
+- **Configuration des écrans** :
   ```bash
-  uv add <nom-du-paquet>
+  uv run hyprsmart monitor --id 0 --use-wall "/chemin/vers/image.png"
+  uv run hyprsmart status
+  ```
+- **Exécution des tests** :
+  ```bash
+  uv run python -m unittest discover tests
   ```
 - **Validation Git** :
   ```bash

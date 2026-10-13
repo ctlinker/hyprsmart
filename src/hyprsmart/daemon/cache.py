@@ -35,3 +35,7 @@ def cache_put(win: Window, text_l: int, bg_l: int)-> None:
 def cache_drop(address: str)-> None:
     with CACHE_LOCK:
         WIN_CACHE.pop(address, None)
+
+def cache_clear()-> None:
+    with CACHE_LOCK:
+        WIN_CACHE.clear()
