@@ -20,6 +20,10 @@ Ce document définit les standards d'ingénierie, l'architecture du projet, les 
 > 
 > 2. **Effectuer un commit Git avec le flag `[ai]`** dans le message pour différencier clairement les interventions de l'agent de celles du développeur humain.
 >    - **Convention de message** : `[ai] <type>: <description>` (ex: `[ai] docs: update AGENT.md and add session report` ou `[ai] fix(opacity): correct numpy coordinate slicing`).
+> 
+> 3. **Mettre à jour `CHANGELOG.md` & incrémenter la version** :
+>    - Dès qu'une fonctionnalité stable ou un correctif est terminé, consigner les changements dans `CHANGELOG.md` (format Keep a Changelog).
+>    - Incrémenter la version dans `pyproject.toml` en respectant [SemVer](https://semver.org/) (patch pour les correctifs, minor pour les fonctionnalités rétrocompatibles, major pour les refontes majeures).
 
 ---
 
@@ -101,6 +105,7 @@ hyprsmart/
 ├── wiki/
 │   └── reports/              # RAPPORTS DE SESSION OBLIGATOIRES (1 par requête)
 ├── AGENT.md                  # Ce guide
+├── CHANGELOG.md              # Journal des versions et modifications (SemVer)
 ├── pyproject.toml            # Configuration du projet Python (uv)
 └── uv.lock                   # Lockfile uv
 ```
