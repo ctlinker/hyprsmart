@@ -1,7 +1,9 @@
+from dataclasses import dataclass
+
 import numpy as np
 from PIL import Image
+
 from hyprsmart.primitive import Window
-from dataclasses import dataclass
 
 # purspose : monitor resoltion downscale factor
 DOWN = 4
