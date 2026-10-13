@@ -1,5 +1,7 @@
-from PIL import Image
 import numpy as np
+from PIL import Image
+from hyprsmart.primitive import Window
+from dataclasses import dataclass
 
 # purspose : monitor resoltion downscale factor
 DOWN = 4
@@ -66,6 +68,7 @@ def load_wallpaper(path: str, monitor_h: int, monitor_w: int):
         round(img.height * scale_fact)
     ), Image.LANCZOS)
 
+
     left = (img.width - target_width) // 2
     top = (img.height - target_height) // 2
 
@@ -76,4 +79,42 @@ def load_wallpaper(path: str, monitor_h: int, monitor_w: int):
         top + target_height
     ))
 
-    return _luminance(np.ndarray(img, dtype=np.float32))
+    return _luminance(np.asarray(img, dtype=np.float32))
+
+
+@dataclass
+class Backdrop:
+    # Summarize a luminance map by considering 3 of it property
+    p5: float   # brightness of the darkest spot
+    p95: float  # brightness of the brightest spot
+    std: float  # how much brightness varies, low => calm or flat, high => busy
+
+def backdrop_behind(
+    lum: np.ndarray, 
+    win: Window, 
+    monitor_x: int, 
+    monitor_y: int
+)-> Backdrop:
+    """
+    This function extracts the exact region of 
+    the monitor behind the passed window. This region is
+    then mapped it against the luminance represention of 
+    the monitor's wallpaper (the lum arg). Finely the 
+    function returns the `Backdrop` of that mapped luminance region.
+    """
+    x0 = max(0, (win.x - monitor_x) // DOWN)
+    y0 = max(0, (win.y - monitor_y) // DOWN)
+    x1 = max(
+        lum.shape[1], 
+        (win.x - monitor_x + win.width) // DOWN
+    )
+    y1 = max(
+        lum.shape[0], 
+        (win.y - monitor_y + win.height) // DOWN
+    )
+    region = lum[x0:x1, y0:y1]
+
+    return Backdrop(
+        *np.percentile(region, [5, 95]), 
+        float(region.std())
+    )
