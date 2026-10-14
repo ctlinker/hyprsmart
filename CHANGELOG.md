@@ -5,6 +5,25 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [0.4.0] - 2026-10-14
+
+### Ajouté
+- **Détecteur multi-signaux de vidéo (`video_detect.py`)** :
+  - Combinaison pondérée de 4 signaux indépendants : invalidation de veille Wayland (`idle_inhibit` $+0.35$), flux audio PipeWire/PulseAudio (`audio_active` $+0.35$), caractéristiques visuelles de scène (`visual_video` $+0.25$) et plein écran (`fullscreen` $+0.15$).
+  - Résolution de l'arbre généalogique des processus `/proc/<pid>/status` pour associer les sous-processus audio (ex: Firefox Content Process) à la fenêtre principale.
+  - Détection insensible aux faux positifs (Spotify musique seule $S=0.35 < 0.55$) et faux négatifs (vidéo muette $S=0.60 \ge 0.55$).
+  - Clamping direct de l'opacité à `video_opacity` (par défaut `1.0`) pour préserver les scènes sombres et l'intégrité visuelle.
+- **Gestionnaire dynamique de configuration CLI (`hyprsmart settings`)** :
+  - Sous-commande `hyprsmart settings` pour lister tous les réglages et leurs descriptions.
+  - Sous-commande `hyprsmart settings <clé> <valeur>` avec validation de type/bornes et sauvegarde persistante dans `config.yaml`.
+  - Commande IPC `set_setting` sur `control.sock` permettant la mise à jour à chaud de la mémoire du démon et le recalcul immédiat.
+- **Suite de tests étendue** : 19 tests unitaires automatisés couvrant les profils vidéo, audio seul, plein écran, et la validation des réglages.
+
+### Corrigé
+- **Format de coordonnées pour `grim`** : Troncature/arrondi entier des coordonnées géométriques dans `capture_window` évitant l'erreur `invalid geometry` de grim lors de l'utilisation de flottants.
+
+---
+
 ## [0.3.0] - 2026-10-14
 
 ### Ajouté

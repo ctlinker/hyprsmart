@@ -6,6 +6,7 @@ from hyprsmart.config import get_current_config
 from hyprsmart.opacity import (
     backdrop_behind,
     decide_opacity,
+    evaluate_video_score,
     get_cached_wallpaper_backdrop_data,
     window_colors,
 )
@@ -138,22 +139,32 @@ def cache_hit_worker() -> None:
                 continue
 
             cfg = get_current_config()
-            wall_path = cfg.get_wallpaper(mon.name, mon.id)
-            wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
+            is_video, v_score, _ = evaluate_video_score(win, w_entry.visuals)
 
-            b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad)
-            alpha = decide_opacity(
-                w_entry.visuals,
-                b,
-                target=cfg.target_contrast,
-                floor=cfg.floor_opacity,
-            )
-            vis = w_entry.visuals
-            print(
-                f"[DECIDE] (cache hit) alpha: {alpha:.2f} "
-                f"(text_dens={vis.text_density:.2f}, bg_ratio={vis.bg_ratio:.2f}, wall_edge={b.edge_energy:.3f}) "
-                f"for {win.address}"
-            )
+            if is_video:
+                alpha = cfg.video_opacity
+                print(
+                    f"[DECIDE] (cache hit - VIDEO S={v_score:.2f}) alpha: {alpha:.2f} "
+                    f"(idle_inhibit={win.inhibiting_idle}, fullscreen={win.fullscreen}) "
+                    f"for {win.address}"
+                )
+            else:
+                wall_path = cfg.get_wallpaper(mon.name, mon.id)
+                wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
+                b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad)
+                alpha = decide_opacity(
+                    w_entry.visuals,
+                    b,
+                    target=cfg.target_contrast,
+                    floor=cfg.floor_opacity,
+                )
+                vis = w_entry.visuals
+                print(
+                    f"[DECIDE] (cache hit) alpha: {alpha:.2f} "
+                    f"(text_dens={vis.text_density:.2f}, bg_ratio={vis.bg_ratio:.2f}, wall_edge={b.edge_energy:.3f}) "
+                    f"for {win.address}"
+                )
+
             set_hyprland_win_opacity(win.address, alpha, alpha)
             record_managed_window(win.address)
         except Exception as e:
@@ -178,21 +189,31 @@ def luminance_worker() -> None:
             cache_put(win, visuals)
 
             cfg = get_current_config()
-            wall_path = cfg.get_wallpaper(mon.name, mon.id)
-            wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
+            is_video, v_score, _ = evaluate_video_score(win, visuals)
 
-            b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad)
-            alpha = decide_opacity(
-                visuals,
-                b,
-                target=cfg.target_contrast,
-                floor=cfg.floor_opacity,
-            )
-            print(
-                f"[DECIDE] alpha: {alpha:.2f} "
-                f"(text_dens={visuals.text_density:.2f}, bg_ratio={visuals.bg_ratio:.2f}, wall_edge={b.edge_energy:.3f}) "
-                f"for {win.address}"
-            )
+            if is_video:
+                alpha = cfg.video_opacity
+                print(
+                    f"[DECIDE] (VIDEO DETECTED S={v_score:.2f}) alpha: {alpha:.2f} "
+                    f"(idle_inhibit={win.inhibiting_idle}, fullscreen={win.fullscreen}) "
+                    f"for {win.address}"
+                )
+            else:
+                wall_path = cfg.get_wallpaper(mon.name, mon.id)
+                wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
+                b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad)
+                alpha = decide_opacity(
+                    visuals,
+                    b,
+                    target=cfg.target_contrast,
+                    floor=cfg.floor_opacity,
+                )
+                print(
+                    f"[DECIDE] alpha: {alpha:.2f} "
+                    f"(text_dens={visuals.text_density:.2f}, bg_ratio={visuals.bg_ratio:.2f}, wall_edge={b.edge_energy:.3f}) "
+                    f"for {win.address}"
+                )
+
             set_hyprland_win_opacity(win.address, alpha, alpha)
             record_managed_window(win.address)
         except Exception as e:

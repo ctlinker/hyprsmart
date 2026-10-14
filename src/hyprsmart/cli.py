@@ -10,9 +10,11 @@ import time
 
 from hyprsmart.config import (
     CONFIG_FILE,
+    SETTINGS_METADATA,
     get_current_config,
     load_config,
     set_monitor_wallpaper,
+    update_setting,
 )
 from hyprsmart.daemon import (
     ControlServer,
@@ -85,6 +87,8 @@ def run_daemon_loop() -> None:
                     "default_wallpaper": cfg.default_wallpaper,
                     "target_contrast": cfg.target_contrast,
                     "floor_opacity": cfg.floor_opacity,
+                    "video_opacity": cfg.video_opacity,
+                    "debounce_interval": cfg.debounce_interval,
                 },
             }
         elif cmd == "reload":
@@ -94,6 +98,16 @@ def run_daemon_loop() -> None:
             cache_clear()
             force_schedule_capture()
             return {"status": "ok", "message": "Configuration and caches reloaded"}
+        elif cmd == "set_setting":
+            key = req.get("key")
+            value = req.get("value")
+            if not key or value is None:
+                return {"status": "error", "message": "Missing key or value parameter"}
+            ok, msg, _ = update_setting(key, str(value))
+            if ok:
+                force_schedule_capture()
+                return {"status": "ok", "message": msg}
+            return {"status": "error", "message": msg}
         elif cmd == "set_monitor_wall":
             mon = req.get("monitor")
             wall = req.get("wallpaper")
@@ -242,6 +256,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"Config File: {CONFIG_FILE}")
     print(f"Target Contrast: {cfg.target_contrast}")
     print(f"Floor Opacity: {cfg.floor_opacity}")
+    print(f"Video Opacity: {cfg.video_opacity}")
     print(f"Default Wallpaper: {cfg.default_wallpaper or 'None'}")
 
     print("\nConnected Monitors (Hyprland):")
@@ -300,6 +315,53 @@ def cmd_what_is_it_doing(args: argparse.Namespace) -> None:
         pass
 
 
+def cmd_settings(args: argparse.Namespace) -> None:
+    cfg = load_config()
+
+    if not args.key:
+        print("=== HyprSmart Settings ===")
+        for key, meta in SETTINGS_METADATA.items():
+            curr_val = getattr(cfg, key, None)
+            val_display = str(curr_val) if curr_val is not None else "None"
+            print(f"  • {key} = {val_display}")
+            print(f"    {meta['description']}")
+        print("\nTo update a setting: hyprsmart settings <key> <value>")
+        return
+
+    key = args.key
+    if args.value is None:
+        meta = SETTINGS_METADATA.get(key)
+        if meta is None:
+            valid_keys = ", ".join(SETTINGS_METADATA.keys())
+            print(f"[ERROR] Unknown setting '{key}'. Valid options: {valid_keys}")
+            return
+        curr_val = getattr(cfg, key, None)
+        print(f"{key} = {curr_val}")
+        print(f"Description: {meta['description']}")
+        return
+
+    # Update setting
+    val = args.value
+    ok, msg, new_cfg = update_setting(key, val)
+    if not ok:
+        print(f"[ERROR] {msg}")
+        return
+
+    print(f"[OK] {msg}")
+
+    # Notify daemon if running
+    try:
+        res = send_control_command({"cmd": "set_setting", "key": key, "value": val}, timeout=2.0)
+        if res.get("status") == "ok":
+            print("[OK] Notified running daemon of setting change.")
+        else:
+            print(f"[WARN] Daemon returned: {res.get('message')}")
+    except ConnectionRefusedError:
+        pass
+    except Exception as e:
+        print(f"[WARN] Failed to notify daemon: {e}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="hyprsmart",
@@ -354,6 +416,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the wallpaper image to use for this monitor",
     )
 
+    # settings
+    p_set = subparsers.add_parser(
+        "settings",
+        help="View or modify daemon configuration settings",
+    )
+    p_set.add_argument(
+        "key",
+        nargs="?",
+        default=None,
+        help="Setting key name (e.g. video_opacity)",
+    )
+    p_set.add_argument(
+        "value",
+        nargs="?",
+        default=None,
+        help="New value for the setting",
+    )
+
     return parser
 
 
@@ -373,6 +453,8 @@ def main() -> None:
         cmd_what_is_it_doing(args)
     elif args.subcommand == "monitor":
         cmd_monitor(args)
+    elif args.subcommand == "settings":
+        cmd_settings(args)
     else:
         # If no arguments provided, display status or help
         parser.print_help()

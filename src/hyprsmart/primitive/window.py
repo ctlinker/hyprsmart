@@ -10,18 +10,26 @@ class Window:
     y: float
     width: float
     height: float
+    pid: int = 0
+    inhibiting_idle: bool = False
+    fullscreen: bool = False
+    window_class: str = ""
 
 def window_from_hyprctl_json_dict(win: dict | None) -> Window | None:
     if not win or not isinstance(win, dict) or "title" not in win or "address" not in win:
         return None
     
     return Window(
-        win.get("title", ""),
-        win["address"],
-        win.get("at", [0, 0])[0],
-        win.get("at", [0, 0])[1],
-        win.get("size", [0, 0])[0],
-        win.get("size", [0, 0])[1],
+        title=win.get("title", ""),
+        address=win["address"],
+        x=float(win.get("at", [0, 0])[0]),
+        y=float(win.get("at", [0, 0])[1]),
+        width=float(win.get("size", [0, 0])[0]),
+        height=float(win.get("size", [0, 0])[1]),
+        pid=int(win.get("pid", 0) or 0),
+        inhibiting_idle=bool(win.get("inhibitingIdle", False)),
+        fullscreen=bool(win.get("fullscreen", False) or win.get("fullscreenClient", False)),
+        window_class=str(win.get("class", "")),
     )
 
 def window_from_hyprctl_json_string(w_str: str) -> Window | None:
@@ -32,7 +40,11 @@ def window_from_hyprctl_json_string(w_str: str) -> Window | None:
         return None
 
 def capture_window(window: Window) -> bytes:
-    geometry = f"{window.x},{window.y} {window.width}x{window.height}"
+    gx = int(round(window.x))
+    gy = int(round(window.y))
+    gw = int(round(window.width))
+    gh = int(round(window.height))
+    geometry = f"{gx},{gy} {gw}x{gh}"
 
     result = subprocess.run(
         ["grim", "-g", geometry, "-"],

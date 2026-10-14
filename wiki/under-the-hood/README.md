@@ -39,6 +39,8 @@ Chaque document explore en profondeur un pilier technique :
    *Sous-échantillonnage Lanczos en mode cover, correspondance des coordonnées moniteur/fenêtre, et stratégies de cache mémoire mtime.*
 5. [**05. IPC Wayland, Threading & Architecture Système**](05_wayland_ipc_and_threading.md)
    *Sockets UNIX Hyprland, files de messages producteur-consommateur, serveur de contrôle CLI et restauration d'opacité.*
+6. [**06. Détection Multi-Signaux de Vidéo**](06_multi_signal_video_detection.md)
+   *Invalidation de veille Wayland, flux audio PipeWire (/proc PPID), heuristiques visuelles de scène et clamp d'opacité dédié.*
 
 ---
 

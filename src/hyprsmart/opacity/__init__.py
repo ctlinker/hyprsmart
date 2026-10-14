@@ -9,6 +9,11 @@ from .backdrop import (
 )
 from .win_col import window_colors, WindowVisuals
 from .compute import decide_opacity
+from .video_detect import (
+    evaluate_video_score,
+    get_active_audio_pids,
+    is_pid_emitting_audio,
+)
 
 __all__ = [
     "Backdrop",
@@ -21,4 +26,7 @@ __all__ = [
     "get_cached_wallpaper_backdrop_data",
     "clear_wallpaper_cache",
     "compute_sobel_energy",
+    "evaluate_video_score",
+    "get_active_audio_pids",
+    "is_pid_emitting_audio",
 ]

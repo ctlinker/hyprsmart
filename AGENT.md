@@ -133,6 +133,9 @@ hyprsmart/
   - Analyse d'énergie des contours du fond d'écran via Sobel 2D pur NumPy ($E_{wall}$).
   - Mesure de la densité textuelle et de la dominante de fond sur les fenêtres ($D_{text}, R_{bg}$).
   - Déblocage de la transparence adaptative sur les terminaux et éditeurs sombres (TTY, VSCode).
+- [x] **Détection Multi-Signaux de Vidéo & Gestion des Paramètres (Terminé)** :
+  - Détecteur multi-niveaux : idle-inhibit Wayland, flux audio PipeWire (/proc PPID), heuristiques visuelles et plein écran.
+  - Commande CLI `hyprsmart settings [clé] [valeur]` pour piloter `video_opacity`, `target_contrast`, etc., avec rechargement IPC à chaud.
 - [ ] **Évolutions Futures** :
   - Détection automatique du fond d'écran via `hyprpaper`, `swww` ou `waypaper`.
   - Prise en compte du z-order pour les fenêtres superposées (multi-tuiles/flottantes).
@@ -150,6 +153,12 @@ hyprsmart/
   ```bash
   uv run hyprsmart stop
   uv run hyprsmart reload
+  ```
+- **Gestion dynamique des paramètres (settings)** :
+  ```bash
+  uv run hyprsmart settings                     # Lister tous les paramètres et valeurs
+  uv run hyprsmart settings video_opacity 0.98  # Configurer l'opacité vidéo
+  uv run hyprsmart settings target_contrast 5.0 # Configurer le contraste cible
   ```
 - **Affichage des logs en direct** :
   ```bash
