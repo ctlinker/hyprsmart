@@ -3,17 +3,22 @@ from .backdrop import (
     backdrop_behind,
     load_wallpaper,
     get_cached_wallpaper_luminance,
+    get_cached_wallpaper_backdrop_data,
     clear_wallpaper_cache,
+    compute_sobel_energy,
 )
-from .win_col import window_colors
+from .win_col import window_colors, WindowVisuals
 from .compute import decide_opacity
 
 __all__ = [
     "Backdrop",
+    "WindowVisuals",
     "decide_opacity",
     "backdrop_behind",
     "window_colors",
     "load_wallpaper",
     "get_cached_wallpaper_luminance",
+    "get_cached_wallpaper_backdrop_data",
     "clear_wallpaper_cache",
+    "compute_sobel_energy",
 ]

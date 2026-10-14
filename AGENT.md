@@ -121,8 +121,12 @@ hyprsmart/
 - [x] **Contrôle & Configuration (Terminé)** :
   - Configuration YAML (`~/.config/hyprsmart/config.yaml`).
   - Serveur de contrôle IPC sur UNIX Domain Socket (`$XDG_RUNTIME_DIR/hyprsmart/control.sock`).
-  - Commandes CLI : `start`, `stop`, `reload`, `status`, `monitor --id <id> --use-wall <path>`.
+  - Commandes CLI : `start`, `stop`, `reload`, `status`, `what-is-it-doing`, `monitor --id <id> --use-wall <path>`.
   - Restauration de l'opacité à 1.0 à l'arrêt du démon.
+- [x] **Contraste Adaptatif & Vision Déterministe (Terminé)** :
+  - Analyse d'énergie des contours du fond d'écran via Sobel 2D pur NumPy ($E_{wall}$).
+  - Mesure de la densité textuelle et de la dominante de fond sur les fenêtres ($D_{text}, R_{bg}$).
+  - Déblocage de la transparence adaptative sur les terminaux et éditeurs sombres (TTY, VSCode).
 - [ ] **Évolutions Futures** :
   - Détection automatique du fond d'écran via `hyprpaper`, `swww` ou `waypaper`.
   - Prise en compte du z-order pour les fenêtres superposées (multi-tuiles/flottantes).

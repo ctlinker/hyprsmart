@@ -6,7 +6,7 @@ from hyprsmart.config import get_current_config
 from hyprsmart.opacity import (
     backdrop_behind,
     decide_opacity,
-    get_cached_wallpaper_luminance,
+    get_cached_wallpaper_backdrop_data,
     window_colors,
 )
 from hyprsmart.primitive import (
@@ -139,17 +139,21 @@ def cache_hit_worker() -> None:
 
             cfg = get_current_config()
             wall_path = cfg.get_wallpaper(mon.name, mon.id)
-            wallpaper_lum = get_cached_wallpaper_luminance(wall_path, mon.width, mon.height)
+            wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
 
-            b = backdrop_behind(wallpaper_lum, win, mon.x, mon.y)
+            b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad)
             alpha = decide_opacity(
-                w_entry.text_l,
-                w_entry.bg_l,
+                w_entry.visuals,
                 b,
                 target=cfg.target_contrast,
                 floor=cfg.floor_opacity,
             )
-            print(f"[DECIDE] (cache hit) alpha: {alpha:.2f} for {win.address}")
+            vis = w_entry.visuals
+            print(
+                f"[DECIDE] (cache hit) alpha: {alpha:.2f} "
+                f"(text_dens={vis.text_density:.2f}, bg_ratio={vis.bg_ratio:.2f}, wall_edge={b.edge_energy:.3f}) "
+                f"for {win.address}"
+            )
             set_hyprland_win_opacity(win.address, alpha, alpha)
             record_managed_window(win.address)
         except Exception as e:
@@ -170,22 +174,25 @@ def luminance_worker() -> None:
             if mon is None:
                 continue
 
-            text_l, bg_l = window_colors(img)
-            cache_put(win, text_l, bg_l)
+            visuals = window_colors(img)
+            cache_put(win, visuals)
 
             cfg = get_current_config()
             wall_path = cfg.get_wallpaper(mon.name, mon.id)
-            wallpaper_lum = get_cached_wallpaper_luminance(wall_path, mon.width, mon.height)
+            wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
 
-            b = backdrop_behind(wallpaper_lum, win, mon.x, mon.y)
+            b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad)
             alpha = decide_opacity(
-                text_l,
-                bg_l,
+                visuals,
                 b,
                 target=cfg.target_contrast,
                 floor=cfg.floor_opacity,
             )
-            print(f"[DECIDE] alpha: {alpha:.2f} for {win.address}")
+            print(
+                f"[DECIDE] alpha: {alpha:.2f} "
+                f"(text_dens={visuals.text_density:.2f}, bg_ratio={visuals.bg_ratio:.2f}, wall_edge={b.edge_energy:.3f}) "
+                f"for {win.address}"
+            )
             set_hyprland_win_opacity(win.address, alpha, alpha)
             record_managed_window(win.address)
         except Exception as e:

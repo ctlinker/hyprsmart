@@ -5,6 +5,23 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [0.3.0] - 2026-10-14
+
+### Ajouté
+- **Analyse d'énergie des contours du fond d'écran ($E_{wall}$)** :
+  - Opérateur de Sobel 2D en pur NumPy (`compute_sobel_energy`) calculant le gradient spatial haute-fréquence.
+  - Mise en cache conjointe de la luminance et de la carte de gradient dans `WALLPAPER_CACHE`.
+  - Extension de `Backdrop` avec `p15`, `p85`, `median` et `edge_energy`.
+- **Mesure de densité textuelle et dominante de fond ($D_{text}, R_{bg}$)** :
+  - Dataclass `WindowVisuals` contenant `text_l`, `bg_l`, `text_density` et `bg_ratio`.
+  - Calcul de la proportion de fond uni et détection des pixels de glyphes par gradient sur la capture de fenêtre.
+- **Moteur de décision adaptatif (`compute.py`)** :
+  - Assouplissement dynamique du contraste cible (jusqu'à 3.0 / 2.8) lorsque le fond d'écran est flouté ou calme ($E_{wall} \le 0.05$).
+  - Utilisation des percentiles tronqués ($p15, p85$) pour débloquer la transparence naturelle sur les fenêtres sombres (TTY, VSCode) sans surréaction aux détails spéculaires isolés.
+- **Tests unitaires enrichis** : 10 tests automatisés validant Sobel, les terminaux sur fond calme vs texturé, et le déballage rétrocompatible de `WindowVisuals`.
+
+---
+
 ## [0.2.0] - 2026-10-13
 
 ### Ajouté
