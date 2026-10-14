@@ -15,8 +15,11 @@ from hyprsmart.opacity import (
 from hyprsmart.primitive import (
     capture_window,
     get_hyprland_active_monitor,
+    get_hyprland_monitors,
     get_hyprland_active_window,
+    get_hyprland_windows,
     set_hyprland_win_opacity,
+    Monitor,
     Window,
 )
 
@@ -175,8 +178,21 @@ def apply_window_decision(
     visuals: WindowVisuals,
     from_cache: bool = False,
     backdrop: Backdrop | None = None,
+    monitor: Monitor | None = None,
+    is_preload: bool = False,
 ) -> None:
-    mon = get_hyprland_active_monitor()
+    mon = monitor
+    if mon is None:
+        # Try matching window monitor_id
+        try:
+            mons = get_hyprland_monitors()
+            mon = next((m for m in mons if m.id == win.monitor_id), None)
+        except Exception:
+            mon = None
+
+    if mon is None:
+        mon = get_hyprland_active_monitor()
+
     if mon is None:
         return
 
@@ -213,16 +229,18 @@ def apply_window_decision(
         return
 
     # Apply new opacity
+    tag = "[PRELOAD]" if is_preload else "[DECIDE]"
     if is_video:
-        prefix = "(cache hit - VIDEO)" if from_cache else "(VIDEO DETECTED)"
-        print(f"[DECIDE] {prefix} alpha: {ideal_alpha:.2f} (S={v_score:.2f}) for {win.address}")
+        prefix = " (cache hit - VIDEO)" if from_cache else " (VIDEO DETECTED)"
+        print(f"{tag}{prefix} alpha: {ideal_alpha:.2f} (S={v_score:.2f}) for {win.address}")
     else:
-        prefix = "(cache hit) " if from_cache else ""
+        prefix = " (cache hit) " if from_cache else " "
         print(
-            f"[DECIDE] {prefix}alpha: {ideal_alpha:.2f} "
+            f"{tag}{prefix}alpha: {ideal_alpha:.2f} "
             f"(text_dens={visuals.text_density:.2f}, bg_ratio={visuals.bg_ratio:.2f}, wall_edge={b.edge_energy:.3f}) "
             f"for {win.address}"
         )
+
 
     set_hyprland_win_opacity(win.address, ideal_alpha, ideal_alpha)
     record_applied_state(win.address, ideal_alpha, backdrop_sig, geom)
@@ -279,13 +297,46 @@ def luminance_worker() -> None:
             LUMINANCE_QUEUE.task_done()
 
 
+def preload_all_windows() -> None:
+    """Preload and apply opacity to all mapped windows using cached class profiles."""
+    if STOP_EVENT.is_set():
+        return
+    try:
+        # Get all mapped, non-hidden windows across all workspaces and monitors
+        all_windows = get_hyprland_windows(filter_fn=lambda w: not w.get("hidden", False) and w.get("mapped", False))
+        if not all_windows:
+            return
+
+        mons = {m.id: m for m in get_hyprland_monitors()}
+        count_preloaded = 0
+
+        for win in all_windows:
+            if STOP_EVENT.is_set():
+                break
+            profile = get_class_profile(win.window_class)
+            if profile is None:
+                continue
+
+            mon = mons.get(win.monitor_id)
+            apply_window_decision(win, profile, from_cache=True, monitor=mon, is_preload=True)
+            count_preloaded += 1
+
+        if count_preloaded > 0:
+            print(f"[INFO] Preloaded profiles for {count_preloaded} window(s) across workspaces")
+    except Exception as e:
+        print(f"[WARN] Error during window profile preloading: {e}")
+
+
 def load_hyprsmart_daemons() -> None:
     STOP_EVENT.clear()
     Thread(target=capture_worker, daemon=True).start()
     Thread(target=cache_hit_worker, daemon=True).start()
     Thread(target=luminance_worker, daemon=True).start()
     print("[INFO] Started HyprSmart workers")
+    # Preload profiles for all existing windows immediately
+    Thread(target=preload_all_windows, daemon=True).start()
     SCHEDULER.schedule("initial_startup", 0.5, schedule_capture, force=False)
+
 
 
 def stop_hyprsmart_daemons() -> None:

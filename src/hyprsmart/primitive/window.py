@@ -14,6 +14,7 @@ class Window:
     inhibiting_idle: bool = False
     fullscreen: bool = False
     window_class: str = ""
+    monitor_id: int = 0
 
 def window_from_hyprctl_json_dict(win: dict | None) -> Window | None:
     if not win or not isinstance(win, dict) or "title" not in win or "address" not in win:
@@ -30,6 +31,7 @@ def window_from_hyprctl_json_dict(win: dict | None) -> Window | None:
         inhibiting_idle=bool(win.get("inhibitingIdle", False)),
         fullscreen=bool(win.get("fullscreen", False) or win.get("fullscreenClient", False)),
         window_class=str(win.get("class", "")),
+        monitor_id=int(win.get("monitor", 0) or 0),
     )
 
 def window_from_hyprctl_json_string(w_str: str) -> Window | None:

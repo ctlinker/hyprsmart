@@ -5,6 +5,23 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [0.7.0] - 2026-10-14
+
+### Ajouté
+- **Persistance des profils de classe (`~/.config/hyprsmart/profiles.json`)** :
+  - Sauvegarde et restauration automatiques des empreintes visuelles des classes de fenêtres (`text_l`, `bg_l`, `text_density`, `bg_ratio`).
+  - Lissage continu en moyenne mobile exponentielle (EMA) persisté sur disque de manière atomique lors des captures.
+- **Préchargement universel au démarrage (`preload_all_windows`)** :
+  - À chaque démarrage du démon, toutes les fenêtres ouvertes et mappées à travers l'ensemble des espaces de travail et moniteurs reçoivent instantanément leur niveau de transparence optimal basé sur leur profil de classe et le fond d'écran sous-jacent.
+  - L'utilisateur n'a plus besoin de cliquer ou focaliser manuellement chaque fenêtre pour déclencher son adaptation d'opacité.
+  - Journalisation explicite dédiée avec l'étiquette `[PRELOAD]`.
+- **Support du ciblage multi-écrans par fenêtre** :
+  - Ajout du champ `monitor_id` dans la structure `Window` et résolution dynamique du moniteur et du fond d'écran associé dans `apply_window_decision`.
+- **Suite de tests étendue (`test_preload_profiles.py`)** :
+  - 31 tests unitaires validant la sérialisation/désérialisation JSON des profils et le préchargement transparent sans exécution de commandes `grim`.
+
+---
+
 ## [0.6.1] - 2026-10-14
 
 ### Modifié & Amélioré

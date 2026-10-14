@@ -63,9 +63,24 @@ $$L_{final} = (1 - w_{ref}) \cdot L_{unblended} + w_{ref} \cdot L_{class\_ref}$$
 
 ---
 
-## 4. Réactivité Dynamique aux Changements de Contenu
+## 4. Persistance des Profils (`profiles.json`) & Préchargement au Démarrage
+
+### Sauvegarde Atomique dans `~/.config/hyprsmart/profiles.json`
+Les profils de classe appris par EMA sont persistés sur disque au format JSON. Chaque mise à jour d'un profil écrit d'abord dans un fichier temporaire `.profiles.json.tmp` avant d'être substituée de manière atomique, prévenant toute corruption en cas d'arrêt imprévu.
+
+### Préchargement Universel (`preload_all_windows`)
+Au démarrage du démon, la fonction `preload_all_windows()` :
+1. Interroge l'ensemble des fenêtres Wayland mappées sur tous les espaces de travail et moniteurs via `get_hyprland_windows()`.
+2. Pour chaque fenêtre dont la classe est connue dans `profiles.json`, extrait la géométrie $(x, y, w, h)$ et découpe la portion correspondante du fond d'écran.
+3. Calcule l'opacité requise via `decide_opacity(profile, backdrop)` et l'applique immédiatement via `set_hyprland_win_opacity`.
+4. **Bénéfice utilisateur** : Les fenêtres préexistantes sur tous les bureaux sont immédiatement adaptées et transparentes dès le lancement de HyprSmart, sans avoir à les focaliser une par une.
+
+---
+
+## 5. Réactivité Dynamique aux Changements de Contenu
 
 Grâce au dé-mélange optique :
-- **Changement d'onglet web ou de thème** : l'événement `windowtitlev2` déclenche après $0.35$ s une capture directe (sans flash). Le dé-mélange reconstruit instantanément la nouvelle luminance du fond ($L_{bg} = 0.05 \to 0.95$).
+- **Changement d'onglet web ou de thème** : l'événement `windowtitlev2` déclenche après $0.25$ s une capture directe (sans flash). Le dé-mélange reconstruit instantanément la nouvelle luminance du fond ($L_{bg} = 0.05 \to 0.95$).
 - **Calcul de contraste instantané** : le moteur WCAG adapte l'opacité à la hausse ou à la baisse selon le nouveau contraste requis.
-- **Transparence vivante et perceptible** : HyprSmart redevient un système dynamique et réactif, ajustant avec précision la transparence sans jamais perturber la lisibilité.
+- **Transparence vivante et perceptible** : HyprSmart s'adapte en temps réel aux déplacements, redimensionnements et changements de focus sans perturber la lisibilité.
+

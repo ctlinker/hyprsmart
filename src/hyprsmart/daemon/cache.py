@@ -24,6 +24,12 @@ class WinEntry:
         return self.visuals.bg_l
 
 
+import json
+from pathlib import Path
+from hyprsmart.config import CONFIG_DIR
+
+PROFILES_FILE = CONFIG_DIR / "profiles.json"
+
 WIN_CACHE: dict[str, WinEntry] = {}
 APPLIED_ALPHAS: dict[str, float] = {}
 CLASS_PROFILES: dict[str, WindowVisuals] = {}
@@ -31,6 +37,51 @@ CLASS_PROFILES: dict[str, WindowVisuals] = {}
 CLASS_CACHE = CLASS_PROFILES
 CACHE_LOCK = RLock()
 MAX_AGE: float = 1800.0  # 30 minutes
+
+
+def load_class_profiles() -> dict[str, WindowVisuals]:
+    """Load persistent class profiles from ~/.config/hyprsmart/profiles.json."""
+    with CACHE_LOCK:
+        if not PROFILES_FILE.exists():
+            return CLASS_PROFILES
+        try:
+            raw_data = json.loads(PROFILES_FILE.read_text(encoding="utf-8"))
+            for cls_name, vals in raw_data.items():
+                if isinstance(vals, dict):
+                    CLASS_PROFILES[cls_name] = WindowVisuals(
+                        text_l=float(vals.get("text_l", 0.5)),
+                        bg_l=float(vals.get("bg_l", 0.05)),
+                        text_density=float(vals.get("text_density", 0.1)),
+                        bg_ratio=float(vals.get("bg_ratio", 0.8)),
+                    )
+        except Exception as e:
+            print(f"[WARN] Failed to load class profiles from {PROFILES_FILE}: {e}")
+        return CLASS_PROFILES
+
+
+def save_class_profiles() -> None:
+    """Save persistent class profiles to ~/.config/hyprsmart/profiles.json."""
+    with CACHE_LOCK:
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            data = {
+                cls_name: {
+                    "text_l": vis.text_l,
+                    "bg_l": vis.bg_l,
+                    "text_density": vis.text_density,
+                    "bg_ratio": vis.bg_ratio,
+                }
+                for cls_name, vis in CLASS_PROFILES.items()
+            }
+            tmp_file = PROFILES_FILE.with_suffix(".tmp")
+            tmp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            tmp_file.replace(PROFILES_FILE)
+        except Exception as e:
+            print(f"[WARN] Failed to save class profiles to {PROFILES_FILE}: {e}")
+
+
+# Initialize profiles on module load
+load_class_profiles()
 
 
 def get_class_profile(window_class: str) -> WindowVisuals | None:
@@ -53,6 +104,7 @@ def update_class_profile(window_class: str, visuals: WindowVisuals) -> None:
                 text_density=round(0.7 * old.text_density + 0.3 * visuals.text_density, 4),
                 bg_ratio=round(0.7 * old.bg_ratio + 0.3 * visuals.bg_ratio, 4),
             )
+        save_class_profiles()
 
 
 def cache_get(win: Window) -> None | WinEntry:
