@@ -5,6 +5,26 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [0.5.0] - 2026-10-14
+
+### Ajouté
+- **Ordonnanceur glissant d'événements (`DebouncedScheduler`)** :
+  - Remplacement du throttle fixe par un trailing debounce par clé annulant les timers antérieurs lors de l'arrivée de nouveaux événements.
+  - Délais adaptatifs pour laisser le temps aux interfaces de s'initialiser (`openwindow`: 0.70s, `windowtitlev2`: 0.35s, `activewindowv2`: 0.15s).
+- **Anti-contamination de transparence des snapshots** :
+  - Restauration transitoire de l'opacité à 1.0 (20 ms) avant la capture physique `grim` lorsqu'une fenêtre déjà transparente doit être re-capturée.
+  - Évite la pollution des couleurs de la fenêtre par le fond d'écran sous-jacent et les dérives en boucle fermée.
+- **Cache hiérarchique avec repli dynamique par classe (`CLASS_CACHE`)** :
+  - Apprentissage automatique et dynamique des profils visuels par `window_class` lors de la première capture (aucun code en dur).
+  - Élimine 99% des re-captures lors des frappes au clavier ou changements de titre dans les terminaux et éditeurs.
+  - Extension de la durée de vie du cache d'instance à 30 minutes (au lieu de 30 secondes).
+- **Diffing d'opacité ($\Delta \alpha < 0.03$)** :
+  - Court-circuit des dispatches IPC `hyprctl` superflus lorsque l'opacité calculée est déjà appropriée pour le fond d'écran.
+  - Suppression des micro-saccades et allègement substantiel de la charge processeur et du compositeur.
+- **Suite de tests étendue** : 24 tests unitaires couvrant l'apprentissage de classe, l'annulation de l'ordonnanceur et le diffing d'opacité.
+
+---
+
 ## [0.4.0] - 2026-10-14
 
 ### Ajouté

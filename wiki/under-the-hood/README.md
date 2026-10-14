@@ -41,6 +41,8 @@ Chaque document explore en profondeur un pilier technique :
    *Sockets UNIX Hyprland, files de messages producteur-consommateur, serveur de contrôle CLI et restauration d'opacité.*
 6. [**06. Détection Multi-Signaux de Vidéo**](06_multi_signal_video_detection.md)
    *Invalidation de veille Wayland, flux audio PipeWire (/proc PPID), heuristiques visuelles de scène et clamp d'opacité dédié.*
+7. [**07. Caching Dynamique, Exécution Différée & Préservation des Snapshots**](07_dynamic_caching_and_deferred_execution.md)
+   *Ordonnanceur glissant (trailing debounce), cache hiérarchique avec repli dynamique par classe, anti-contamination de transparence et diffing d'opacité.*
 
 ---
 

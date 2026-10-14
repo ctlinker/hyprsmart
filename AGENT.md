@@ -136,6 +136,11 @@ hyprsmart/
 - [x] **Détection Multi-Signaux de Vidéo & Gestion des Paramètres (Terminé)** :
   - Détecteur multi-niveaux : idle-inhibit Wayland, flux audio PipeWire (/proc PPID), heuristiques visuelles et plein écran.
   - Commande CLI `hyprsmart settings [clé] [valeur]` pour piloter `video_opacity`, `target_contrast`, etc., avec rechargement IPC à chaud.
+- [x] **Caching Dynamique, Exécution Différée & Anti-Contamination (Terminé)** :
+  - Ordonnanceur glissant (`DebouncedScheduler`) annulant les timers antérieurs pour laisser l'interface se stabiliser.
+  - Restauration transitoire à 1.0 (20 ms) lors des re-captures pour garantir des snapshots purs et sans contamination du fond d'écran.
+  - Cache hiérarchique avec repli dynamique par `window_class` (zéro hardcoding).
+  - Diffing d'opacité ($\Delta \alpha < 0.03$) éliminant les micro-saccades et les dispatches IPC redondants.
 - [ ] **Évolutions Futures** :
   - Détection automatique du fond d'écran via `hyprpaper`, `swww` ou `waypaper`.
   - Prise en compte du z-order pour les fenêtres superposées (multi-tuiles/flottantes).
