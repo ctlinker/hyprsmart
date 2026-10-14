@@ -10,7 +10,7 @@ CONFIG_FILE = CONFIG_DIR / "config.yaml"
 class HyprsmartConfig:
     monitors: dict[str, str] = field(default_factory=dict)
     default_wallpaper: str | None = None
-    target_contrast: float = 4.5
+    target_contrast: float = 6.0
     floor_opacity: float = 0.5
     video_opacity: float = 1.0
     debounce_interval: float = 0.1
@@ -36,7 +36,7 @@ def load_config() -> HyprsmartConfig:
         _CURRENT_CONFIG = HyprsmartConfig(
             monitors={str(k): str(v) for k, v in data.get("monitors", {}).items()},
             default_wallpaper=data.get("default_wallpaper"),
-            target_contrast=float(data.get("target_contrast", 4.5)),
+            target_contrast=float(data.get("target_contrast", 6.0)),
             floor_opacity=float(data.get("floor_opacity", 0.5)),
             video_opacity=float(data.get("video_opacity", 1.0)),
             debounce_interval=float(data.get("debounce_interval", 0.1)),

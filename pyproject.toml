@@ -19,3 +19,9 @@ hyprsmart = "hyprsmart:main"
 [build-system]
 requires = ["uv_build>=0.12.11,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "nuitka>=4.3",
+    "pyinstaller>=6.22.3",
+]

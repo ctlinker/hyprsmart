@@ -56,6 +56,7 @@ $$CR = \frac{L_1 + 0.05}{L_2 + 0.05}$$
 Cette valeur constante simule la **réflexion parasite de la lumière ambiante** sur la vitre de l'écran (*ambient flare*). Même dans une pièce sombre, le noir absolu d'un moniteur n'est jamais parfait en raison des reflets.
 - Le ratio varie de $1.0:1$ (aucun contraste, couleurs identiques) à $21.0:1$ (noir pur sur blanc pur).
 - Le standard WCAG AA exige un minimum de **4.5:1** pour le texte normal, et **3.0:1** pour le grand texte ou les éléments d'interface à fort contraste.
+- **Calibrage HyprSmart (`target_contrast: 6.0`)** : L'expérience pratique montre qu'une cible de **6.0:1** constitue le *sweet spot* optimal entre lisibilité et transparence. Ce niveau assure un confort de lecture supérieur au standard minimal AA (4.5:1) tout en permettant à l'adaptation de relâcher l'opacité jusqu'à $0.60 - 0.75$ sur les fonds calmes.
 
 ---
 

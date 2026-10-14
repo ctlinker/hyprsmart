@@ -98,8 +98,8 @@ HyprSmart features an interactive CLI settings manager:
 # View all active settings, bounds, and descriptions
 hyprsmart settings
 
-# Adjust the target WCAG contrast ratio (default: 4.5)
-hyprsmart settings target_contrast 4.0
+# Adjust the target WCAG contrast ratio (default: 6.0 — sweet spot for legibility & aesthetics)
+hyprsmart settings target_contrast 6.0
 
 # Adjust minimum transparency floor (default: 0.5)
 hyprsmart settings floor_opacity 0.45
@@ -119,7 +119,7 @@ monitors:
   '0': /home/user/Pictures/Wallpapers/mountain.png
   eDP-1: /home/user/Pictures/Wallpapers/mountain.png
 default_wallpaper: /home/user/Pictures/Wallpapers/default.png
-target_contrast: 4.5
+target_contrast: 6.0
 floor_opacity: 0.5
 video_opacity: 0.92
 debounce_interval: 0.1
