@@ -24,6 +24,10 @@ Ce document définit les standards d'ingénierie, l'architecture du projet, les 
 > 3. **Mettre à jour `CHANGELOG.md` & incrémenter la version** :
 >    - Dès qu'une fonctionnalité stable ou un correctif est terminé, consigner les changements dans `CHANGELOG.md` (format Keep a Changelog).
 >    - Incrémenter la version dans `pyproject.toml` en respectant [SemVer](https://semver.org/) (patch pour les correctifs, minor pour les fonctionnalités rétrocompatibles, major pour les refontes majeures).
+> 
+> 4. **Documentation `wiki/under-the-hood/` & Règle d'Archivage** :
+>    - Les concepts mathématiques, optiques, algorithmiques et système qui rendent le projet possible sont expliqués dans `wiki/under-the-hood/`.
+>    - **Règle absolue** : Si un concept ou une brique algorithmique est déprécié, remplacé ou supprimé du code source, son document explicatif **ne doit jamais être purement supprimé**. Il doit impérativement être déplacé dans `wiki/under-the-hood/archives/` avec le motif du remplacement et le successeur technique.
 
 ---
 
@@ -103,7 +107,9 @@ hyprsmart/
 │           └── window.py     # Dataclass Window, grim, hyprctl dispatch opacity
 ├── tests/                    # Tests unitaires du moteur (unittest)
 ├── wiki/
-│   └── reports/              # RAPPORTS DE SESSION OBLIGATOIRES (1 par requête)
+│   ├── reports/              # RAPPORTS DE SESSION OBLIGATOIRES (1 par requête)
+│   └── under-the-hood/       # Concepts fondamentaux (WCAG, Sobel, quantification, etc.)
+│       └── archives/         # Concepts dépréciés/remplacés (VLM v1, etc.)
 ├── AGENT.md                  # Ce guide
 ├── CHANGELOG.md              # Journal des versions et modifications (SemVer)
 ├── pyproject.toml            # Configuration du projet Python (uv)
