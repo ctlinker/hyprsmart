@@ -1,6 +1,6 @@
 import time
 from dataclasses import dataclass
-from threading import Lock
+from threading import RLock
 
 from hyprsmart.opacity.win_col import WindowVisuals
 from hyprsmart.primitive import Window
@@ -25,9 +25,33 @@ class WinEntry:
 
 
 WIN_CACHE: dict[str, WinEntry] = {}
-CLASS_CACHE: dict[str, WindowVisuals] = {}
-CACHE_LOCK = Lock()
+CLASS_PROFILES: dict[str, WindowVisuals] = {}
+# Alias for backward compatibility
+CLASS_CACHE = CLASS_PROFILES
+CACHE_LOCK = RLock()
 MAX_AGE: float = 1800.0  # 30 minutes
+
+
+def get_class_profile(window_class: str) -> WindowVisuals | None:
+    with CACHE_LOCK:
+        return CLASS_PROFILES.get(window_class)
+
+
+def update_class_profile(window_class: str, visuals: WindowVisuals) -> None:
+    if not window_class:
+        return
+    with CACHE_LOCK:
+        if window_class not in CLASS_PROFILES:
+            CLASS_PROFILES[window_class] = visuals
+        else:
+            old = CLASS_PROFILES[window_class]
+            # Exponential Moving Average (70% prior, 30% new)
+            CLASS_PROFILES[window_class] = WindowVisuals(
+                text_l=round(0.7 * old.text_l + 0.3 * visuals.text_l, 4),
+                bg_l=round(0.7 * old.bg_l + 0.3 * visuals.bg_l, 4),
+                text_density=round(0.7 * old.text_density + 0.3 * visuals.text_density, 4),
+                bg_ratio=round(0.7 * old.bg_ratio + 0.3 * visuals.bg_ratio, 4),
+            )
 
 
 def cache_get(win: Window) -> None | WinEntry:
@@ -36,19 +60,6 @@ def cache_get(win: Window) -> None | WinEntry:
         e = WIN_CACHE.get(win.address)
         if e and e.title == win.title and (now - e.time_set < MAX_AGE):
             return e
-
-        # If title changed or instance not found, fall back to learned class visuals
-        if win.window_class and win.window_class in CLASS_CACHE:
-            class_vis = CLASS_CACHE[win.window_class]
-            # Return synthetic or updated entry using class visuals
-            last_alpha = e.last_alpha if e else 1.0
-            return WinEntry(
-                visuals=class_vis,
-                title=win.title,
-                time_set=now,
-                last_alpha=last_alpha,
-            )
-
     return None
 
 
@@ -77,7 +88,7 @@ def cache_put(
             last_alpha=last_alpha,
         )
         if win.window_class:
-            CLASS_CACHE[win.window_class] = vis
+            update_class_profile(win.window_class, vis)
 
 
 def record_applied_state(

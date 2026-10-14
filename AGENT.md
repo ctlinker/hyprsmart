@@ -138,9 +138,11 @@ hyprsmart/
   - Commande CLI `hyprsmart settings [clé] [valeur]` pour piloter `video_opacity`, `target_contrast`, etc., avec rechargement IPC à chaud.
 - [x] **Caching Dynamique, Exécution Différée & Anti-Contamination (Terminé)** :
   - Ordonnanceur glissant (`DebouncedScheduler`) annulant les timers antérieurs pour laisser l'interface se stabiliser.
-  - Restauration transitoire à 1.0 (20 ms) lors des re-captures pour garantir des snapshots purs et sans contamination du fond d'écran.
-  - Cache hiérarchique avec repli dynamique par `window_class` (zéro hardcoding).
   - Diffing d'opacité ($\Delta \alpha < 0.03$) éliminant les micro-saccades et les dispatches IPC redondants.
+- [x] **Dé-mélange Optique & Profils Génériques de Classe (Terminé)** :
+  - Dé-mélange analytique exact de l'alpha compositing inversant la transparence sans clignotement.
+  - Profils génériques de classe (`CLASS_PROFILES`) actualisés par moyenne mobile (EMA $70/30$).
+  - Régularisation adaptative et détection immédiate des changements de contenu (sites sombres/clairs).
 - [ ] **Évolutions Futures** :
   - Détection automatique du fond d'écran via `hyprpaper`, `swww` ou `waypaper`.
   - Prise en compte du z-order pour les fenêtres superposées (multi-tuiles/flottantes).

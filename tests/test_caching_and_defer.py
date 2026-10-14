@@ -49,7 +49,13 @@ class TestCachingAndDeferred(unittest.TestCase):
         self.assertIsNotNone(entry)
         self.assertEqual(entry.visuals.text_l, 0.92)
 
-        # 2. Same window, title changed (e.g. user ran nvim)
+        # 2. Learned class profile is available
+        from hyprsmart.daemon.cache import get_class_profile
+        prof = get_class_profile("foot")
+        self.assertIsNotNone(prof)
+        self.assertEqual(prof.text_l, 0.92)
+
+        # 3. Renamed window is a cache miss so content changes trigger re-inspection
         win1_renamed = Window(
             title="nvim config.py",
             address="0x1111",
@@ -59,25 +65,7 @@ class TestCachingAndDeferred(unittest.TestCase):
             height=600,
             window_class="foot",
         )
-        entry2 = cache_get(win1_renamed)
-        self.assertIsNotNone(entry2)
-        # Should have fallen back to learned class visuals without recapturing
-        self.assertEqual(entry2.visuals.text_l, 0.92)
-        self.assertEqual(entry2.title, "nvim config.py")
-
-        # 3. New second window of the same class (foot)
-        win2 = Window(
-            title="htop",
-            address="0x2222",
-            x=100,
-            y=100,
-            width=800,
-            height=600,
-            window_class="foot",
-        )
-        entry3 = cache_get(win2)
-        self.assertIsNotNone(entry3)
-        self.assertEqual(entry3.visuals.text_l, 0.92)
+        self.assertIsNone(cache_get(win1_renamed))
 
     def test_applied_alpha_tracking(self):
         win = Window(

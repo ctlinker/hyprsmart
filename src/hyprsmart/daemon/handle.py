@@ -4,6 +4,7 @@ from threading import Thread, Timer, Event, Lock
 
 from hyprsmart.config import get_current_config
 from hyprsmart.opacity import (
+    Backdrop,
     backdrop_behind,
     decide_opacity,
     evaluate_video_score,
@@ -25,6 +26,7 @@ from .cache import (
     cache_get,
     cache_put,
     get_applied_alpha,
+    get_class_profile,
     record_applied_state,
 )
 from .socket import HyprEvent
@@ -56,6 +58,7 @@ class DebouncedScheduler:
                 except Exception:
                     pass
             t = Timer(delay, self._run_and_clean, args=(key, target, args, kwargs))
+            t.daemon = True
             self._timers[key] = t
             t.start()
 
@@ -118,14 +121,14 @@ def handle_event(ev: HyprEvent) -> None:
 
     # Delays for trailing debounce
     if ev.kind == "activewindowv2":
-        # Focus switch: quick reaction
+        # Focus switch: quick reaction, check cache first
         SCHEDULER.schedule("active_window", 0.15, schedule_capture, force=False)
     elif ev.kind == "windowtitlev2":
-        # Title changes (typing in terminal, tab switching): trailing settle delay
-        SCHEDULER.schedule("active_window", 0.35, schedule_capture, force=False)
+        # Title changes (URL/tab change, buffer change): trailing settle delay then unblended capture
+        SCHEDULER.schedule("active_window", 0.35, schedule_capture, force=True)
     elif ev.kind == "openwindow":
         # New window opening: wait for window painting to settle
-        SCHEDULER.schedule("active_window", 0.70, schedule_capture, force=False)
+        SCHEDULER.schedule("active_window", 0.70, schedule_capture, force=True)
     elif ev.kind in ("fullscreen", "movewindowv2"):
         SCHEDULER.schedule("active_window", 0.20, schedule_capture, force=False)
 
@@ -154,17 +157,6 @@ def capture_worker() -> None:
             continue
 
         try:
-            # Anti-contamination: if window was already set transparent,
-            # briefly restore 1.0 so grim captures pristine window content.
-            applied = get_applied_alpha(win.address)
-            was_transparent = applied < 0.99
-            if was_transparent:
-                try:
-                    set_hyprland_win_opacity(win.address, 1.0, 1.0)
-                    time.sleep(0.02)
-                except Exception:
-                    pass
-
             img = capture_window(win)
             LUMINANCE_QUEUE.put((win, img))
         except Exception as e:
@@ -173,7 +165,12 @@ def capture_worker() -> None:
             CAPTURE_QUEUE.task_done()
 
 
-def apply_window_decision(win: Window, visuals: WindowVisuals, from_cache: bool = False) -> None:
+def apply_window_decision(
+    win: Window,
+    visuals: WindowVisuals,
+    from_cache: bool = False,
+    backdrop: Backdrop | None = None,
+) -> None:
     mon = get_hyprland_active_monitor()
     if mon is None:
         return
@@ -181,13 +178,15 @@ def apply_window_decision(win: Window, visuals: WindowVisuals, from_cache: bool 
     cfg = get_current_config()
     is_video, v_score, _ = evaluate_video_score(win, visuals)
 
-    b = None
+    b = backdrop
     if is_video:
         ideal_alpha = cfg.video_opacity
     else:
-        wall_path = cfg.get_wallpaper(mon.name, mon.id)
-        wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
-        b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad)
+        if b is None:
+            wall_path = cfg.get_wallpaper(mon.name, mon.id)
+            wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
+            b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad)
+
         ideal_alpha = decide_opacity(
             visuals,
             b,
@@ -202,7 +201,6 @@ def apply_window_decision(win: Window, visuals: WindowVisuals, from_cache: bool 
     geom = (int(win.x), int(win.y), int(win.width), int(win.height))
 
     if alpha_diff < DIFF_OPACITY_THRESHOLD:
-        # Opacity is already appropriate: skip IPC dispatch
         record_applied_state(win.address, current_alpha, backdrop_sig, geom)
         record_managed_window(win.address)
         return
@@ -247,9 +245,27 @@ def luminance_worker() -> None:
             continue
 
         try:
-            visuals = window_colors(img)
+            mon = get_hyprland_active_monitor()
+            if mon is None:
+                continue
+
+            cfg = get_current_config()
+            wall_path = cfg.get_wallpaper(mon.name, mon.id)
+            wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
+            b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad)
+
+            current_alpha = get_applied_alpha(win.address)
+            class_ref = get_class_profile(win.window_class)
+
+            # Optical unblending: reconstruct true window content
+            visuals = window_colors(
+                img,
+                current_alpha=current_alpha,
+                backdrop_median=b.median,
+                class_ref=class_ref,
+            )
             cache_put(win, visuals)
-            apply_window_decision(win, visuals, from_cache=False)
+            apply_window_decision(win, visuals, from_cache=False, backdrop=b)
         except Exception as e:
             print(f"[WARN] Error in luminance_worker: {e}")
         finally:

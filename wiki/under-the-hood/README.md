@@ -43,6 +43,8 @@ Chaque document explore en profondeur un pilier technique :
    *Invalidation de veille Wayland, flux audio PipeWire (/proc PPID), heuristiques visuelles de scène et clamp d'opacité dédié.*
 7. [**07. Caching Dynamique, Exécution Différée & Préservation des Snapshots**](07_dynamic_caching_and_deferred_execution.md)
    *Ordonnanceur glissant (trailing debounce), cache hiérarchique avec repli dynamique par classe, anti-contamination de transparence et diffing d'opacité.*
+8. [**08. Dé-mélange Optique & Profils Génériques de Classe**](08_optical_unblending_and_class_profiles.md)
+   *Inversion mathématique de l'alpha compositing, profils de classe EMA et régularisation adaptative sans clignotement.*
 
 ---
 

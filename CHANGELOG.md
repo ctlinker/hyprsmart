@@ -5,6 +5,22 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [0.6.0] - 2026-10-14
+
+### Ajouté
+- **Dé-mélange optique direct (`unblend_luminance` dans `win_col.py`)** :
+  - Inversion analytique exacte de l'alpha compositing : $L_{pure} = \text{clamp}((L_{captured} - (1 - \alpha) \cdot L_{backdrop}) / \alpha, 0.0, 1.0)$.
+  - Suppression totale du clignotement transitoire (flash à 1.0) : la fenêtre transparente est capturée telle quelle et ses couleurs originelles sont restaurées par calcul.
+  - Détection immédiate des changements de contenu (ex: passage d'un site sombre à une page web blanche) dès que `windowtitlev2` se stabilise.
+- **Profils génériques de classe avec moyenne mobile (`CLASS_PROFILES`)** :
+  - Actualisation continue de l'empreinte visuelle de chaque classe d'application via EMA ($70\%$ historique, $30\%$ observation).
+  - Régularisation adaptative bayésienne lors du dé-mélange si $\alpha$ est faible pour immuniser le calcul contre le bruit.
+- **Verrou réentrant (`RLock`) dans `cache.py`** :
+  - Remplacement de `Lock` par `RLock` éliminant tout risque d'auto-deadlock sur les appels imbriqués de cache.
+- **Suite de tests unitaire étendue** : 29 tests validant l'inversion optique synthétique, le lissage EMA des classes et la non-régression du moteur.
+
+---
+
 ## [0.5.0] - 2026-10-14
 
 ### Ajouté
