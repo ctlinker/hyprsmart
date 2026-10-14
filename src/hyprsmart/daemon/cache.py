@@ -25,6 +25,7 @@ class WinEntry:
 
 
 WIN_CACHE: dict[str, WinEntry] = {}
+APPLIED_ALPHAS: dict[str, float] = {}
 CLASS_PROFILES: dict[str, WindowVisuals] = {}
 # Alias for backward compatibility
 CLASS_CACHE = CLASS_PROFILES
@@ -98,6 +99,7 @@ def record_applied_state(
     geom: tuple[int, int, int, int] | None = None,
 ) -> None:
     with CACHE_LOCK:
+        APPLIED_ALPHAS[address] = alpha
         entry = WIN_CACHE.get(address)
         if entry:
             entry.last_alpha = alpha
@@ -107,6 +109,8 @@ def record_applied_state(
 
 def get_applied_alpha(address: str) -> float:
     with CACHE_LOCK:
+        if address in APPLIED_ALPHAS:
+            return APPLIED_ALPHAS[address]
         entry = WIN_CACHE.get(address)
         if entry:
             return entry.last_alpha
@@ -116,9 +120,11 @@ def get_applied_alpha(address: str) -> float:
 def cache_drop(address: str) -> None:
     with CACHE_LOCK:
         WIN_CACHE.pop(address, None)
+        APPLIED_ALPHAS.pop(address, None)
 
 
 def cache_clear() -> None:
     with CACHE_LOCK:
         WIN_CACHE.clear()
+        APPLIED_ALPHAS.clear()
         CLASS_CACHE.clear()

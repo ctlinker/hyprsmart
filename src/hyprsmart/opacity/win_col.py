@@ -70,9 +70,13 @@ def window_colors(
     bg_rgb = np.array([(top >> 8) & 15, (top >> 4) & 15, top & 15]) * 16 + 8
     raw_bg_l = float(_luminance(bg_rgb.astype(np.float32)))
 
-    # 2. Text luminance = extreme pixels on the opposite end of background luminance
+    # 2. Text luminance = prominent elements on the opposite end of background luminance
     lum = _luminance(rgb.astype(np.float32))
-    raw_text_l = float(np.percentile(lum, 99 if raw_bg_l < 0.5 else 1))
+    non_bg = lum[np.abs(lum - raw_bg_l) > 0.05]
+    if len(non_bg) > 30:
+        raw_text_l = float(np.percentile(non_bg, 95 if raw_bg_l < 0.5 else 5))
+    else:
+        raw_text_l = float(np.percentile(lum, 99.5 if raw_bg_l < 0.5 else 0.5))
 
     # 3. Text density = ratio of pixels with sharp high-frequency edges
     grad = compute_sobel_energy(lum)

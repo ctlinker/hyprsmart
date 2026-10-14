@@ -67,8 +67,14 @@ La luminance perçue derrière le texte devient :
 $$L_{perçu}(\alpha) = \alpha \cdot L_{bg} + (1.0 - \alpha) \cdot L_{wall}$$
 
 ### La condition d'acceptation de HyprSmart :
-Pour garantir que le texte de la fenêtre reste parfaitement lisible, HyprSmart recherche la plus petite valeur d'$\alpha$ telle que :
+Pour garantir que le texte de la fenêtre reste parfaitement lisible tout en offrant une transparence esthétique et agréable, HyprSmart applique une **double contrainte adaptative** :
 
-$$CR(L_{text}, L_{perçu}(\alpha)) \ge CR_{cible}$$
+1. **Critère principal (médiane représentative)** :
+   La luminance perçue moyenne sous la fenêtre doit respecter le ratio cible adaptatif ($CR_{cible}$) :
+   $$CR(L_{text}, \alpha \cdot L_{bg} + (1.0 - \alpha) \cdot L_{median}) \ge CR_{cible}$$
 
-Cette formule permet de calculer mathématiquement l'opacité sans aucune approximation ni modèle d'intelligence artificielle.
+2. **Plancher de sécurité (lisibilité des points lumineux)** :
+   Même sur les spots spéculaires les plus brillants du fond d'écran ($p85$ ou $p95$), le ratio ne doit jamais descendre sous un plancher minimal de **2.0:1** afin d'éviter tout éblouissement local :
+   $$\min_{x \in \{p_{15}, p_{85}\}} CR(L_{text}, \alpha \cdot L_{bg} + (1.0 - \alpha) \cdot x) \ge 2.0$$
+
+Ce découplage permet aux fenêtres sombres (éditeurs, terminaux) d'atteindre une transparence visible et confortable ($\alpha \approx 0.65 - 0.75$) sur des fonds calmes tout en empêchant mathématiquement la perte de lisibilité.

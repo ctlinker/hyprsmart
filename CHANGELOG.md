@@ -5,6 +5,23 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [0.6.1] - 2026-10-14
+
+### Modifié & Amélioré
+- **Recalibration adaptative du contraste (`compute.py`)** :
+  - Découplage de la conformité WCAG sur la médiane représentative du fond d'écran et du plancher de lisibilité minimal ($\ge 2.0$) sur les percentiles extrêmes (`p85`/`p95`).
+  - Permet aux fenêtres sombres (IDE, terminaux, chat) de s'établir naturellement à une transparence visible et agréable ($\alpha \approx 0.65 - 0.75$) sans rester bloquées à 0.95/1.0.
+- **Extraction précise de la luminance du texte (`win_col.py`)** :
+  - Échantillonnage ciblé sur les pixels distincts de l'arrière-plan ($|L - L_{bg}| > 0.05$) au 95ᵉ percentile, capturant la brillance réelle des glyphes de code et éléments textuels plutôt que le noir d'arrière-plan ou les bordures atténuées.
+- **Réactivité instantanée des événements (`handle.py`)** :
+  - Raccourcissement drastique des délais de debouncing pour les changements de focus (`activewindowv2`: 0.05s) et les déplacements (`movewindowv2`: 0.08s).
+  - Garantie que les fenêtres nouvellement gérées reçoivent immédiatement leur niveau de transparence sans être bloquées par un diffing initial.
+  - Nettoyage automatique des fenêtres fermées dans `MANAGED_WINDOWS` sur `closewindow`.
+- **Isolation stricte de la configuration dans la suite de tests (`test_video_detect.py`)** :
+  - Utilisation d'un `TemporaryDirectory` et réinitialisation du singleton `_CURRENT_CONFIG` pour empêcher les tests de modifier le fichier de configuration réel `~/.config/hyprsmart/config.yaml`.
+
+---
+
 ## [0.6.0] - 2026-10-14
 
 ### Ajouté

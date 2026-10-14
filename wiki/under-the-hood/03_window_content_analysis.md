@@ -54,8 +54,11 @@ Le texte et les éléments interactifs d'une interface graphique sont par défin
 - Si le fond est sombre ($L_{bg} < 0.5$) : le texte se trouve dans les **hauts percentiles** de luminance.
 - Si le fond est clair ($L_{bg} \ge 0.5$) : le texte se trouve dans les **bas percentiles**.
 
-Pour éliminer d'éventuels pixels d'artefacts isolés (curseur clignotant blanc sur fond clair, ou pixel mort noir sur fond sombre), HyprSmart extrait :
-$$L_{text} = \begin{cases} \text{percentile}(99\%, L) & \text{si } L_{bg} < 0.5 \\ \text{percentile}(1\%, L) & \text{si } L_{bg} \ge 0.5 \end{cases}$$
+### Filtrage des pixels d'arrière-plan
+Dans un éditeur de texte ou un terminal, l'arrière-plan couvre souvent plus de 80% à 90% de la surface. Si l'on extrait un percentile global (ex: 99%), on risque de capturer des bordures sombres ou du bruit de fond plutôt que les véritables glyphes de texte.
+HyprSmart isole d'abord les pixels significativement distincts de la couleur de fond ($|L - L_{bg}| > 0.05$).
+- Si une quantité suffisante de pixels contrastés existe ($N_{non\_bg} > 30$), le 95ᵉ percentile des pixels contrastés est retenu ($5ᵉ$ percentile sur fond clair).
+- Sinon, un percentile de repli ($99.5ᵉ$ / $0.5ᵉ$) sur l'ensemble de l'image est utilisé.
 
 ---
 

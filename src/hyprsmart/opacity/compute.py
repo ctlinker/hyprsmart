@@ -69,13 +69,16 @@ def decide_opacity(
     else:
         samples = (backdrop.p5, backdrop.p95)
 
-    # 4. Search for the lowest opacity 'a' in [floor, 1.0] that satisfies effective contrast
+    # 4. Search for the lowest opacity 'a' in [floor, 1.0] that satisfies contrast:
+    # - Primary criterion: Satisfy effective target contrast against the representative median backdrop.
+    # - Safety floor: Maintain at least 2.0:1 contrast against worst-case backdrop highlights.
     for a in np.arange(floor, 1.001, 0.05):
-        worst = min(
+        r_median = _ratio(vis.text_l, a * vis.bg_l + (1.0 - a) * backdrop.median)
+        r_worst = min(
             _ratio(vis.text_l, a * vis.bg_l + (1.0 - a) * x)
             for x in samples
         )
-        if worst >= effective_target:
+        if r_median >= effective_target and r_worst >= 2.0:
             return float(round(a, 2))
 
     return 1.0

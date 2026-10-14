@@ -115,22 +115,27 @@ def handle_event(ev: HyprEvent) -> None:
 
     if ev.kind == "closewindow":
         addr = ev.content.strip().split(",")[0]
+        if not addr.startswith("0x"):
+            addr = f"0x{addr}"
         SCHEDULER.cancel(addr)
         cache_drop(addr)
+        with MANAGED_LOCK:
+            MANAGED_WINDOWS.discard(addr)
         return
 
     # Delays for trailing debounce
     if ev.kind == "activewindowv2":
-        # Focus switch: quick reaction, check cache first
-        SCHEDULER.schedule("active_window", 0.15, schedule_capture, force=False)
+        # Focus switch: snappy reaction, instant cache hit path
+        SCHEDULER.schedule("active_window", 0.05, schedule_capture, force=False)
     elif ev.kind == "windowtitlev2":
         # Title changes (URL/tab change, buffer change): trailing settle delay then unblended capture
-        SCHEDULER.schedule("active_window", 0.35, schedule_capture, force=True)
+        SCHEDULER.schedule("active_window", 0.25, schedule_capture, force=True)
     elif ev.kind == "openwindow":
         # New window opening: wait for window painting to settle
-        SCHEDULER.schedule("active_window", 0.70, schedule_capture, force=True)
+        SCHEDULER.schedule("active_window", 0.50, schedule_capture, force=True)
     elif ev.kind in ("fullscreen", "movewindowv2"):
-        SCHEDULER.schedule("active_window", 0.20, schedule_capture, force=False)
+        # Geometry changes: fast backdrop slice recalculation
+        SCHEDULER.schedule("active_window", 0.08, schedule_capture, force=False)
 
 
 def force_schedule_capture() -> None:
@@ -195,14 +200,16 @@ def apply_window_decision(
         )
 
     # Opacity diffing: check if current opacity is already appropriate
+    with MANAGED_LOCK:
+        is_already_managed = win.address in MANAGED_WINDOWS
+
     current_alpha = get_applied_alpha(win.address)
     alpha_diff = abs(ideal_alpha - current_alpha)
     backdrop_sig = (b.p15, b.p85, b.edge_energy) if b is not None else None
     geom = (int(win.x), int(win.y), int(win.width), int(win.height))
 
-    if alpha_diff < DIFF_OPACITY_THRESHOLD:
+    if is_already_managed and alpha_diff < DIFF_OPACITY_THRESHOLD:
         record_applied_state(win.address, current_alpha, backdrop_sig, geom)
-        record_managed_window(win.address)
         return
 
     # Apply new opacity

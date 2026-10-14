@@ -158,7 +158,29 @@ class TestVideoDetection(unittest.TestCase):
         self.assertTrue(details["fullscreen"])
 
 
+import tempfile
+from pathlib import Path
+
+
 class TestSettingsValidation(unittest.TestCase):
+    def setUp(self):
+        import hyprsmart.config
+        hyprsmart.config._CURRENT_CONFIG = None
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.tmp_config_file = Path(self.tmp_dir.name) / "config.yaml"
+        self.patcher1 = patch("hyprsmart.config.CONFIG_DIR", Path(self.tmp_dir.name))
+        self.patcher2 = patch("hyprsmart.config.CONFIG_FILE", self.tmp_config_file)
+        self.patcher1.start()
+        self.patcher2.start()
+
+    def tearDown(self):
+        import hyprsmart.config
+        hyprsmart.config._CURRENT_CONFIG = None
+        self.patcher2.stop()
+        self.patcher1.stop()
+        self.tmp_dir.cleanup()
+
+
     def test_update_video_opacity_valid(self):
         ok, msg, cfg = update_setting("video_opacity", "0.92")
         self.assertTrue(ok)
@@ -186,3 +208,4 @@ class TestSettingsValidation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
