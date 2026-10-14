@@ -1,13 +1,147 @@
-# HYPRSMART
+<div align="center">
 
-## WHAT IS THIS ABOUT?
+<img src="assets/logo.png" alt="HyprSmart Logo" width="220" />
 
-I love Hyprland, but I have a small issue with transparency.
+# hyprsmart
+### *Adaptive intelligence for Hyprland*
 
-Hyprland's transparency is glamorous until it isn't. It can ruin contrast and make certain types of content harder to read.
+[![Python](https://img.shields.io/badge/Python-3.14+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Hyprland](https://img.shields.io/badge/Hyprland-Wayland-00B4D8?style=flat-square)](https://hyprland.org)
+[![WCAG 2.1](https://img.shields.io/badge/Accessibility-WCAG%202.1-4CAF50?style=flat-square)](https://www.w3.org/WAI/standards-guidelines/wcag/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
-Having to manually toggle transparency on and off with keybinds gets annoying, especially on bad days.
+*Real-time, deterministic, and ergonomically calibrated window transparency for the Hyprland Wayland compositor.*
 
-HyprSmart aims to solve this problem by listening to Hyprland's events and identifying when a window can safely be transparent without compromising readability.
+</div>
 
-It does so by using AI, partially, to analyze window snapshots, infer visual properties, and make appropriate transparency decisions.
+---
+
+## What is HyprSmart?
+
+Hyprland's window transparency is gorgeous—until a light wallpaper renders your code editor illegible, or a dark video player gets washed out. Constantly juggling manual toggles (`toggleopaque`) is disruptive to workflow and breaks immersion.
+
+**HyprSmart** acts as an adaptive perceptual daemon. It continuously observes window activity, analyses foreground text and background dominance, measures the exact wallpaper clutter behind each window, and dynamically computes the optimal opacity level. 
+
+Every adjustment guarantees text clarity according to **WCAG 2.x relative luminance contrast standards**, giving you effortless, beautiful transparency that never sacrifices readability.
+
+---
+
+## Key Features
+
+- **Mathematical Determinism (Zero Latency)**: No heavy AI models, OCR, or local LLM inferencing in the loop. Opacity decisions are computed in $< 1.5\text{ ms}$ using vectorized sRGB relative luminance and Sobel edge energy.
+- **Optical Unblending (Deconvolution)**: Eliminates screen flashes and transparency feedback loops. Transparent windows are captured as-is and their pure original colors are mathematically reconstructed by inverting alpha compositing ($L_{pure} = \frac{L_{captured} - (1 - \alpha) L_{backdrop}}{\alpha}$).
+- **Multi-Signal Video Detection**: Distinguishes streaming video and multimedia windows from static text documents using PipeWire audio emission markers, idle-inhibition flags, full-screen states, and low text density. Automatically clamps opacity (e.g. `0.92` - `1.0`) to preserve contrast.
+- **Universal Startup Preloading**: When the daemon launches, all open windows across all workspaces and monitors immediately adopt their ideal transparency using cached profiles, without requiring manual clicks or focus shifts.
+- **Persistent Profiles (`~/.config/hyprsmart/profiles.json`)**: Automatically learns visual fingerprints (`text_l`, `bg_l`, `text_density`, `bg_ratio`) per window class using Exponential Moving Averages (EMA) and persists them safely across reboots.
+- **Micro-Reactive Adjustments**: Focus switches, window dragging across light/dark wallpaper areas, and resizing seamlessly trigger microscopic opacity updates tailored in real-time to the user's eye.
+
+---
+
+## Architectural Flow
+
+```mermaid
+graph TD
+    A[Hyprland Socket2 Events] -->|activewindow / move / title| B(Debounced Scheduler)
+    B --> C{Profile Cached in profiles.json?}
+    C -->|Yes: Startup & Focus| D[Slice Wallpaper Under Geometry]
+    C -->|No / Title Change| E[grim Capture]
+    E --> F[Optical Unblending]
+    F --> G[Extract Window Visuals & Update Class EMA]
+    G --> D
+    D --> H[Sobel Edge Energy & Backdrop Saliency]
+    H --> I[Dual-Constraint WCAG Solver]
+    I --> J{Delta alpha > 0.03?}
+    J -->|Yes| K[hyprctl Dispatch Opacity]
+    J -->|No| L[Skip IPC - Zero Flicker]
+```
+
+---
+
+## Installation & Requirements
+
+### System Requirements
+- **OS**: Linux with Wayland
+- **Compositor**: [Hyprland](https://hyprland.org) ($\ge 0.40.0$)
+- **Tools**: `grim` (for screen captures), `hyprctl`, and PipeWire (`pactl` or `pw-cli`)
+- **Python**: $\ge 3.14$ (or running via `uv`)
+
+### Installation via uv
+```bash
+git clone https://github.com/ctlinker/hyprsmart.git
+cd hyprsmart
+uv sync
+```
+
+---
+
+## Usage
+
+### Controlling the Daemon
+```bash
+# Start the resident daemon in the background
+hyprsmart start
+
+# Inspect live decision logs in real-time
+hyprsmart what-is-it-doing --watch
+
+# Inspect the last 20 actions
+hyprsmart what-is-it-doing -n 20
+
+# Stop the daemon (automatically restores all windows to 1.0)
+hyprsmart stop
+```
+
+### Inspecting & Tweaking Settings
+HyprSmart features an interactive CLI settings manager:
+
+```bash
+# View all active settings, bounds, and descriptions
+hyprsmart settings
+
+# Adjust the target WCAG contrast ratio (default: 4.5)
+hyprsmart settings target_contrast 4.0
+
+# Adjust minimum transparency floor (default: 0.5)
+hyprsmart settings floor_opacity 0.45
+
+# Adjust fixed opacity for detected video streams (default: 0.92)
+hyprsmart settings video_opacity 0.95
+```
+
+---
+
+## Configuration (`config.yaml`)
+
+Configuration files are located in `~/.config/hyprsmart/config.yaml`:
+
+```yaml
+monitors:
+  '0': /home/user/Pictures/Wallpapers/mountain.png
+  eDP-1: /home/user/Pictures/Wallpapers/mountain.png
+default_wallpaper: /home/user/Pictures/Wallpapers/default.png
+target_contrast: 4.5
+floor_opacity: 0.5
+video_opacity: 0.92
+debounce_interval: 0.1
+```
+
+---
+
+## Documentation
+
+Explore the deep technical mechanics and mathematical formulations in our documentation:
+- **[Under the Hood](wiki/under-the-hood/README.md)**:
+  - [01. sRGB Relative Luminance & WCAG Contrast](wiki/under-the-hood/01_wcag_relative_luminance.md)
+  - [02. Spatial Gradients & Sobel Edge Energy](wiki/under-the-hood/02_spatial_gradient_and_edge_detection.md)
+  - [03. Window Content Analysis & Bit-Shift Quantization](wiki/under-the-hood/03_window_content_analysis.md)
+  - [04. Wallpaper Sampling & Coordinate Geometry](wiki/under-the-hood/04_wallpaper_sampling_and_caching.md)
+  - [05. Wayland IPC & Multi-Threaded Architecture](wiki/under-the-hood/05_wayland_ipc_and_threading.md)
+  - [06. Multi-Signal Video Detection](wiki/under-the-hood/06_multi_signal_video_detection.md)
+  - [07. Dynamic Caching & Trailing Debounce](wiki/under-the-hood/07_dynamic_caching_and_deferred_execution.md)
+  - [08. Optical Unblending & Persistent Class Profiles](wiki/under-the-hood/08_optical_unblending_and_class_profiles.md)
+
+---
+
+## License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
