@@ -23,13 +23,18 @@ class WindowVisuals:
 
 
 def visual_delta(v1: WindowVisuals, v2: WindowVisuals) -> float:
-    """Compute the maximum absolute change across the 4 visual dimensions between two snapshots."""
+    """
+    Compute the perceptual change across visual dimensions.
+    Luminance shifts (background and text polarity) are weighted at 1.0,
+    while spatial texture variations (glyph density and background ratio)
+    are scaled to 0.50 to prevent cursors/carousel micro-noise from inflating delta.
+    """
     return float(
         max(
             abs(v1.bg_l - v2.bg_l),
             abs(v1.text_l - v2.text_l),
-            abs(v1.bg_ratio - v2.bg_ratio),
-            abs(v1.text_density - v2.text_density),
+            0.50 * abs(v1.bg_ratio - v2.bg_ratio),
+            0.50 * abs(v1.text_density - v2.text_density),
         )
     )
 

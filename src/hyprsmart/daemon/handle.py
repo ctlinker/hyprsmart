@@ -137,6 +137,7 @@ class ProgressiveSession:
     last_thumb_arr: np.ndarray | None = None
     last_geom: tuple[int, int, int, int] | None = None
     last_alpha: float = 1.0
+    smoothed_alpha: float = 1.0
     cancelled: bool = False
 
 
@@ -216,6 +217,7 @@ class ProgressiveReevaluator:
             last_thumb_arr=initial_thumb,
             last_geom=geom,
             last_alpha=initial_alpha,
+            smoothed_alpha=initial_alpha,
         )
 
         with self._lock:
@@ -374,7 +376,28 @@ class ProgressiveReevaluator:
         # Update instance cache immediately, but defer persistent class EMA update until convergence
         cache_put(win, visuals, captured_alpha=captured_alpha, update_class=False)
 
-        if delta >= PROGRESSIVE_DELTA_THRESHOLD:
+        # Compute raw solver alpha and apply anti-hunting temporal damping (0.60/0.40)
+        # on micro-jumps (< 0.10) to eliminate 1-step boundary wobble on dynamic windows
+        raw_ideal_alpha = decide_opacity(
+            visuals,
+            b,
+            target=cfg.target_contrast,
+            floor=cfg.floor_opacity,
+        )
+        alpha_jump = abs(raw_ideal_alpha - session.smoothed_alpha)
+        if alpha_jump >= 0.10:
+            # Significant shift (theme flip or real load): snap immediately with zero lag
+            session.smoothed_alpha = raw_ideal_alpha
+        else:
+            # Micro-fluctuation (0.05 discretization hunting): damp smoothly
+            session.smoothed_alpha = round(0.60 * session.smoothed_alpha + 0.40 * raw_ideal_alpha, 2)
+        damped_alpha = round(session.smoothed_alpha, 2)
+
+        # Temporal annealing: relax delta threshold slightly after initial load (t > 3)
+        # to filter out residual carousel/cursor micro-noise and allow clean convergence
+        effective_threshold = PROGRESSIVE_DELTA_THRESHOLD + 0.005 * max(0, min(6, session.current_tick - 3))
+
+        if delta >= effective_threshold:
             session.stable_ticks = 0
             session.last_change_tick = session.current_tick
             session.max_delta = max(session.max_delta, delta)
@@ -387,6 +410,7 @@ class ProgressiveReevaluator:
                 before_img_bytes=img,
                 class_profile_before=class_ref,
                 class_profile_after=class_ref,
+                target_alpha=damped_alpha,
             )
             session.last_alpha = get_applied_alpha(win.address)
         else:
@@ -401,6 +425,7 @@ class ProgressiveReevaluator:
                     before_img_bytes=img,
                     class_profile_before=class_ref,
                     class_profile_after=class_ref,
+                    target_alpha=damped_alpha,
                 )
                 session.last_alpha = get_applied_alpha(win.address)
 
@@ -551,6 +576,7 @@ def apply_window_decision(
     before_img_bytes: bytes | None = None,
     class_profile_before: WindowVisuals | None = None,
     class_profile_after: WindowVisuals | None = None,
+    target_alpha: float | None = None,
 ) -> None:
     with DECISION_LOCK:
         mon = monitor
@@ -586,6 +612,8 @@ def apply_window_decision(
 
         if is_video:
             ideal_alpha = cfg.video_opacity
+        elif target_alpha is not None:
+            ideal_alpha = float(target_alpha)
         else:
             ideal_alpha = decide_opacity(
                 visuals,

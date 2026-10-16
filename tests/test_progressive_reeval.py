@@ -231,6 +231,60 @@ class TestProgressiveReevaluation(unittest.TestCase):
         self.assertIsNone(reeval.active_session)
         self.assertTrue(session.cancelled)
 
+    def test_visual_delta_scales_texture_noise(self):
+        v1 = WindowVisuals(text_l=0.80, bg_l=0.05, text_density=0.10, bg_ratio=0.80)
+        # Blinking cursor or small widget alters text_density and bg_ratio by 0.04
+        v2 = WindowVisuals(text_l=0.80, bg_l=0.05, text_density=0.14, bg_ratio=0.84)
+        delta = visual_delta(v1, v2)
+        # Scaled by 0.50 -> 0.04 * 0.50 = 0.02, which is below the 0.03 threshold
+        self.assertAlmostEqual(delta, 0.02, places=4)
+        self.assertLess(delta, 0.03)
+
+    @patch("hyprsmart.daemon.handle.apply_window_decision")
+    @patch("hyprsmart.daemon.handle.get_hyprland_monitors")
+    @patch("hyprsmart.daemon.handle.get_hyprland_active_window")
+    @patch("hyprsmart.daemon.handle.capture_window")
+    def test_anti_hunting_dampens_micro_fluctuations(
+        self,
+        mock_capture,
+        mock_get_active_win,
+        mock_get_monitors,
+        mock_apply_decision,
+    ):
+        mock_mon = Monitor(id=0, name="eDP-1", x=0, y=0, width=1920, height=1080, scale=1.0)
+        mock_get_monitors.return_value = [mock_mon]
+
+        win = Window(
+            title="Dynamic Page",
+            address="0xcafe",
+            x=0,
+            y=0,
+            width=1000,
+            height=700,
+            window_class="browser",
+        )
+        mock_get_active_win.return_value = win
+
+        # Synthetic image that produces a minor visual fluctuation
+        png1 = _make_png_bytes((20, 20, 20), (220, 220, 220))
+        # Slightly altered image (small texture variation)
+        png2 = _make_png_bytes((20, 20, 20), (230, 230, 230))
+
+        mock_scheduler = MagicMock(spec=DebouncedScheduler)
+        reeval = ProgressiveReevaluator(mock_scheduler)
+
+        init_vis = WindowVisuals(text_l=0.70, bg_l=0.02, text_density=0.10, bg_ratio=0.80)
+        session = reeval.start_session(win, initial_visuals=init_vis, initial_alpha=0.65)
+        self.assertEqual(session.smoothed_alpha, 0.65)
+
+        # Step tick 1 with png2
+        mock_capture.return_value = png2
+        reeval.step_tick(session)
+        # If solver wanted 0.70 (a 0.05 step jump), smoothed_alpha should be damped (e.g. 0.67)
+        # rather than wildly jumping by a full 0.05 step
+        self.assertLessEqual(session.smoothed_alpha, 0.70)
+        self.assertGreaterEqual(session.smoothed_alpha, 0.65)
+
 
 if __name__ == "__main__":
     unittest.main()

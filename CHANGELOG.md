@@ -5,6 +5,18 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [0.8.1] - 2026-10-16
+
+### Corrigé
+- **Stabilisation et élimination des oscillations d'opacité en fin de session progressive (Anti-wobble / Anti-hunting)** :
+  - **Amortissement temporel des micro-sauts d'opacité (`smoothed_alpha` dans `handle.py`)** : Pour toute fluctuation $\le 0.10$ au cours des ticks progressifs, application d'un filtre passe-bas exponentiel ($\alpha_{\text{target}} = 0.60 \cdot \alpha_{\text{smoothed}} + 0.40 \cdot \alpha_{\text{raw}}$) avec dispatch IPC uniquement si $|\alpha_{\text{target}} - \alpha_{\text{applied}}| \ge 0.03$. Élimine le phénomène de chasse (hunting) entre paliers discrets ($0.65 \leftrightarrow 0.70$) induit par la quantification sur grille de 0.05 et les animations sRGB du compositeur.
+  - **Pondération sélective du bruit spatial (`visual_delta` dans `win_col.py`)** : Réduction du coefficient des variations de texture spatiale et de densité textuelle à $0.50 \times |\Delta R_{\text{bg}}|$ et $0.50 \times |\Delta D_{\text{text}}|$ afin d'éviter que le clignotement d'un curseur, un micro-carrousel CSS ou une animation périphérique n'empêche l'accumulation des `stable_ticks`.
+  - **Recuit thermique du seuil de sensibilité temporelle (`effective_threshold`)** : Augmentation progressive du seuil de sensibilité au-delà de 3 secondes ($t > 3$) selon $\text{threshold} = 0.03 + 0.005 \times \min(6, t - 3)$ (jusqu'à $0.06$). Cette tolérance dynamique permet aux fenêtres dynamiques de converger sereinement dès que les changements massifs du chargement initial sont achevés.
+  - **Maintien de la réactivité immédiate** : Les variations majeures ($|\Delta\alpha| > 0.10$) contournent immédiatement l'amortisseur pour garantir une adaptation instantanée.
+  - **Suite de tests enrichie** : Ajout de tests unitaires dédiés dans `tests/test_progressive_reeval.py` portant le total à 38 tests au vert.
+
+---
+
 ## [0.8.0] - 2026-10-16
 
 ### Ajouté

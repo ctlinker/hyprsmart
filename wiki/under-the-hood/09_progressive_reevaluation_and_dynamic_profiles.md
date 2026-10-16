@@ -84,3 +84,23 @@ Pour éviter que les états de chargement intermédiaires ($t = 1, 2, \dots$) ne
 - **Phase d'apprentissage (`sample_count < 5`)** : Utilise systématiquement le budget complet configuré (`reeval_max_ticks = 11`, `reeval_stable_ticks = 8`).
 - **Classe statique prouvée (`sample_count >= 5`, `volatility < 0.025`, `settle_time <= 1.0s`)** : Les terminaux ou éditeurs locaux réduisent automatiquement leur budget de vérification (ex: $2$ ticks stables sur $5$), économisant les ressources système.
 - **Classe volatile (`volatility >= 0.06` ou `settle_time > 3.0s`)** : Les navigateurs web conservent l'intégralité de la fenêtre de surveillance progressive et déclenchent même une vérification légère lors d'un retour de focus (`activewindowv2`) pour détecter les changements d'onglets silencieux.
+
+---
+
+## 6. Suppression des Oscillations de Frontière & Anti-Hunting
+
+Sur des pages web modérément dynamiques (présence d'un carrousel d'images, bannières légères, curseur clignotant ou streaming de texte), trois verrous empêchent tout vacillement (*wobble*) d'opacité en fin de session :
+
+1. **Pondération Asymétrique du $\Delta V_t$ (Bruit de Texture vs Saut de Contenu)** :
+   $$\Delta V_t = \max\Big( |\Delta L_{\text{bg}}|, \; |\Delta L_{\text{text}}|, \; 0.50 \cdot |\Delta R_{\text{bg}}|, \; 0.50 \cdot |\Delta D_{\text{text}}| \Big)$$
+   Les variations spatiales de texture ($\Delta R_{\text{bg}}, \Delta D_{\text{text}}$) induites par un curseur ou un widget sont atténuées de $50\%$, évitant de remettre intempestivement le compteur de stabilité à $0$.
+
+2. **Amortissement Temporel Anti-Hunting ($\Delta\alpha < 0.10$)** :
+   Le solveur WCAG échantillonne l'espace des opacités par pas discrets de $0.05$. Pour éviter qu'une micro-variation ne fasse osciller l'opacité d'un pas à l'autre ($0.65 \leftrightarrow 0.70$), un filtre EMA de lissage temporel est appliqué sur l'opacité cible :
+   $$\alpha_{\text{damped}} = \begin{cases} \alpha_{\text{solver}} & \text{si } |\alpha_{\text{solver}} - \alpha_{\text{smoothed}}| \ge 0.10 \text{ (saut franc)} \\ 0.60 \cdot \alpha_{\text{smoothed}} + 0.40 \cdot \alpha_{\text{solver}} & \text{si } |\alpha_{\text{solver}} - \alpha_{\text{smoothed}}| < 0.10 \text{ (micro-saut)} \end{cases}$$
+   Une fluctuation isolée d'un tick ($0.05$) produit une variation amortie de $\approx 0.02 < 0.03$, neutralisée par `DIFF_OPACITY_THRESHOLD` sans dispatch IPC.
+
+3. **Recuit Temporel du Seuil ($\text{Annealing}$ après $t > 3$)** :
+   Le seuil de sensibilité évolue au fil de la session :
+   $$\text{threshold}(t) = 0.03 + 0.005 \times \max(0, \min(6, t - 3))$$
+   Passées les 3 premières secondes où le chargement principal est accompli, le seuil s'assouplit progressivement jusqu'à $0.06$, absorbant les animations résiduelles et permettant à la fenêtre de converger calmement vers son opacité d'équilibre.
