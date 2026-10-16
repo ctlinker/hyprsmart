@@ -1,4 +1,7 @@
 from .handle import (
+    PROGRESSIVE,
+    ProgressiveReevaluator,
+    ProgressiveSession,
     handle_event,
     load_hyprsmart_daemons,
     preload_all_windows,
@@ -17,6 +20,9 @@ from .dev_trace import (
 )
 
 __all__ = [
+    "PROGRESSIVE",
+    "ProgressiveReevaluator",
+    "ProgressiveSession",
     "handle_event",
     "listen_hyprland_socket",
     "load_hyprsmart_daemons",

@@ -32,7 +32,8 @@ Every adjustment guarantees text clarity according to **WCAG 2.x relative lumina
 - **Optical Unblending (Deconvolution)**: Eliminates screen flashes and transparency feedback loops. Transparent windows are captured as-is and their pure original colors are mathematically reconstructed by inverting alpha compositing ($L_{pure} = \frac{L_{captured} - (1 - \alpha) L_{backdrop}}{\alpha}$).
 - **Multi-Signal Video Detection**: Distinguishes streaming video and multimedia windows from static text documents using PipeWire audio emission markers, idle-inhibition flags, full-screen states, and low text density. Automatically clamps opacity (e.g. `0.92` - `1.0`) to preserve contrast.
 - **Universal Startup Preloading**: When the daemon launches, all open windows across all workspaces and monitors immediately adopt their ideal transparency using cached profiles, without requiring manual clicks or focus shifts.
-- **Persistent Profiles (`~/.config/hyprsmart/profiles.json`)**: Automatically learns visual fingerprints (`text_l`, `bg_l`, `text_density`, `bg_ratio`) per window class using Exponential Moving Averages (EMA) and persists them safely across reboots.
+- **Persistent & Emergent Dynamic Profiles (`~/.config/hyprsmart/profiles.json`)**: Automatically learns visual fingerprints (`text_l`, `bg_l`, `text_density`, `bg_ratio`) and temporal dynamics (`volatility`, `settle_time`, `sample_count`) per window class using Exponential Moving Averages (EMA).
+- **Cancelable Progressive Re-evaluation**: Tracks slow-loading windows (browsers, SPAs, Electron apps) across up to `11` one-second ticks (stopping early after `8` consecutive stable seconds), adapting the probing budget per class as its dynamic profile emerges.
 - **Micro-Reactive Adjustments**: Focus switches, window dragging across light/dark wallpaper areas, and resizing seamlessly trigger microscopic opacity updates tailored in real-time to the user's eye.
 
 ---
@@ -44,9 +45,9 @@ graph TD
     A[Hyprland Socket2 Events] -->|activewindow / move / title| B(Debounced Scheduler)
     B --> C{Profile Cached in profiles.json?}
     C -->|Yes: Startup & Focus| D[Slice Wallpaper Under Geometry]
-    C -->|No / Title Change| E[grim Capture]
-    E --> F[Optical Unblending]
-    F --> G[Extract Window Visuals & Update Class EMA]
+    C -->|No / Title Change| E[grim Capture + Progressive Re-evaluator]
+    E --> F[Optical Unblending & Polarity-Flip Check]
+    F --> G[Extract Window Visuals & Converged Class EMA]
     G --> D
     D --> H[Sobel Edge Energy & Backdrop Saliency]
     H --> I[Dual-Constraint WCAG Solver]
@@ -106,6 +107,10 @@ hyprsmart settings floor_opacity 0.45
 
 # Adjust fixed opacity for detected video streams (default: 0.92)
 hyprsmart settings video_opacity 0.95
+
+# Configure progressive re-evaluation ticks and early-stop stability
+hyprsmart settings reeval_max_ticks 11
+hyprsmart settings reeval_stable_ticks 8
 ```
 
 ---
@@ -123,6 +128,9 @@ target_contrast: 6.0
 floor_opacity: 0.5
 video_opacity: 0.92
 debounce_interval: 0.1
+reeval_max_ticks: 11
+reeval_stable_ticks: 8
+reeval_interval: 1.0
 ```
 
 ---
@@ -139,6 +147,7 @@ Explore the deep technical mechanics and mathematical formulations in our docume
   - [06. Multi-Signal Video Detection](wiki/under-the-hood/06_multi_signal_video_detection.md)
   - [07. Dynamic Caching & Trailing Debounce](wiki/under-the-hood/07_dynamic_caching_and_deferred_execution.md)
   - [08. Optical Unblending & Persistent Class Profiles](wiki/under-the-hood/08_optical_unblending_and_class_profiles.md)
+  - [09. Progressive Re-evaluation & Emergent Dynamic Profiles](wiki/under-the-hood/09_progressive_reevaluation_and_dynamic_profiles.md)
 
 ---
 

@@ -201,6 +201,9 @@ def run_daemon_loop(dev_trace: bool = False) -> None:
                     "floor_opacity": cfg.floor_opacity,
                     "video_opacity": cfg.video_opacity,
                     "debounce_interval": cfg.debounce_interval,
+                    "reeval_max_ticks": cfg.reeval_max_ticks,
+                    "reeval_stable_ticks": cfg.reeval_stable_ticks,
+                    "reeval_interval": cfg.reeval_interval,
                 },
             }
         elif cmd == "set_dev_mode":

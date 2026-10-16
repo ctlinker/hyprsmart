@@ -7,7 +7,7 @@ from .backdrop import (
     clear_wallpaper_cache,
     compute_sobel_energy,
 )
-from .win_col import window_colors, WindowVisuals, unblend_luminance
+from .win_col import window_colors, WindowVisuals, unblend_luminance, visual_delta
 from .compute import decide_opacity
 from .video_detect import (
     evaluate_video_score,
@@ -27,6 +27,7 @@ __all__ = [
     "clear_wallpaper_cache",
     "compute_sobel_energy",
     "unblend_luminance",
+    "visual_delta",
     "evaluate_video_score",
     "get_active_audio_pids",
     "is_pid_emitting_audio",

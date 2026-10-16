@@ -5,6 +5,41 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [0.8.1] - 2026-10-16
+
+### Corrigé
+- **Stabilisation et élimination des oscillations d'opacité en fin de session progressive (Anti-wobble / Anti-hunting)** :
+  - **Amortissement temporel des micro-sauts d'opacité (`smoothed_alpha` dans `handle.py`)** : Pour toute fluctuation $\le 0.10$ au cours des ticks progressifs, application d'un filtre passe-bas exponentiel ($\alpha_{\text{target}} = 0.60 \cdot \alpha_{\text{smoothed}} + 0.40 \cdot \alpha_{\text{raw}}$) avec dispatch IPC uniquement si $|\alpha_{\text{target}} - \alpha_{\text{applied}}| \ge 0.03$. Élimine le phénomène de chasse (hunting) entre paliers discrets ($0.65 \leftrightarrow 0.70$) induit par la quantification sur grille de 0.05 et les animations sRGB du compositeur.
+  - **Pondération sélective du bruit spatial (`visual_delta` dans `win_col.py`)** : Réduction du coefficient des variations de texture spatiale et de densité textuelle à $0.50 \times |\Delta R_{\text{bg}}|$ et $0.50 \times |\Delta D_{\text{text}}|$ afin d'éviter que le clignotement d'un curseur, un micro-carrousel CSS ou une animation périphérique n'empêche l'accumulation des `stable_ticks`.
+  - **Recuit thermique du seuil de sensibilité temporelle (`effective_threshold`)** : Augmentation progressive du seuil de sensibilité au-delà de 3 secondes ($t > 3$) selon $\text{threshold} = 0.03 + 0.005 \times \min(6, t - 3)$ (jusqu'à $0.06$). Cette tolérance dynamique permet aux fenêtres dynamiques de converger sereinement dès que les changements massifs du chargement initial sont achevés.
+  - **Maintien de la réactivité immédiate** : Les variations majeures ($|\Delta\alpha| > 0.10$) contournent immédiatement l'amortisseur pour garantir une adaptation instantanée.
+  - **Suite de tests enrichie** : Ajout de tests unitaires dédiés dans `tests/test_progressive_reeval.py` portant le total à 38 tests au vert.
+
+---
+
+## [0.8.0] - 2026-10-16
+
+### Ajouté
+- **Moteur de réévaluation progressive annulable (`ProgressiveReevaluator` dans `handle.py`)** :
+  - Surveillance cadencée toutes les `1.0s` jusqu'à `11` ticks par défaut (`reeval_max_ticks = 11`) avec arrêt anticipé après `8` ticks stables consécutifs (`reeval_stable_ticks = 8`) pour accompagner le chargement asynchrone des pages web et applications Electron.
+  - Annulation instantanée sur changement de focus (`activewindowv2`), fermeture (`closewindow`), nouveau titre (`windowtitlev2`) ou détection d'un flux vidéo actif.
+  - Court-circuit d'identité pixel sur miniature $32 \times 32$ (`_quick_thumbnail_array`) évitant tout recalcul Sobel/WCAG/IPC lorsque l'affichage et la géométrie sont identiques au tick précédent.
+- **Émergence de profils dynamiques par classe (`volatility`, `settle_time`, `sample_count` dans `profiles.json`)** :
+  - Apprentissage EMA de l'amplitude maximale de changement visuel ($\max_t \Delta V_t$) et du temps de stabilisation ($t^*$) par `window_class`.
+  - Protection anti-pollution du profil de classe : l'EMA persistante n'est mise à jour qu'à la convergence de la session progressive (`record_class_probing_session`).
+  - Adaptation automatique du budget de ticks (`get_adaptive_reeval_budget`) après la phase d'observation initiale (`sample_count >= 5`).
+- **Contournement de régularisation sur inversion de polarité (`unblend_luminance` dans `win_col.py`)** :
+  - Désactivation automatique de l'ancrage au profil de classe lorsque $|L_{\text{unblended}} - L_{\text{class\_ref}}| > 0.25$, permettant une adaptation immédiate à $100\%$ lors du passage d'un écran de chargement sombre à une page web claire (ou inversement).
+- **Nouveaux paramètres CLI & YAML (`reeval_max_ticks`, `reeval_stable_ticks`, `reeval_interval`)** :
+  - Support de la validation de type `int` et `float` via `hyprsmart settings` et surveillance en direct de `config.yaml` (`config_watcher_worker`).
+- **Mode diagnostic développeur (`dev_trace.py`) & améliorations optiques (`backdrop.py`, `win_col.py`)** :
+  - Sauvegarde de bundles `before.png`, `after.png` et `metadata.json` avec décomposition complète du solveur WCAG.
+  - Échantillonnage multi-frames pour les fonds d'écran animés (`.gif`/`.webp`), saillance chromatique de Helmholtz-Kohlrausch, support HiDPI (`monitor_scale`) et clustering de voisinage 12-bits.
+- **Suite de tests unitaires enrichie (`test_progressive_reeval.py`)** :
+  - **36 tests unitaires** couvrant la convergence progressive, le court-circuit pixel, la bascule de polarité et l'adaptation du budget par classe.
+
+---
+
 ## [0.7.0] - 2026-10-14
 
 ### Ajouté

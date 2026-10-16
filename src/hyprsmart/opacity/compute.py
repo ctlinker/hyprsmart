@@ -73,31 +73,37 @@ def decide_opacity(
 
     # 4. Calibrate foreground glyph luminance to prevent 4x thumbnail downscale blur or
     #    isolated pure-white highlights from compressing the solver's dynamic range.
+    w_med = 0.35 + 0.35 * w_trim
+    w_samp = 1.0 - w_med
+    gamma_exp = 0.58 + 0.27 * w_trim
+    std_weight = 0.45 - 0.25 * w_trim
+
     if vis.bg_l < 0.5:
         cal_text_l = min(0.60, max(vis.bg_l + 0.42, 0.48, 0.45 * vis.text_l + 0.55 * 0.52))
-        raw_bleed = 0.35 * backdrop.median + 0.65 * sample_high
-        # Wayland/Hyprland composites window alpha in gamma-encoded sRGB space (L^0.58),
+        raw_bleed = w_med * backdrop.median + w_samp * sample_high
+        # Wayland/Hyprland composites window alpha in gamma-encoded sRGB space,
         # and wallpaper variance (std) + spatial edges mask glyph strokes.
         disturb_l = min(
             1.0,
-            (max(0.0, raw_bleed) ** 0.58)
-            + 0.45 * backdrop.std
+            (max(0.0, raw_bleed) ** gamma_exp)
+            + std_weight * backdrop.std
             + 1.10 * backdrop.edge_energy,
         )
-        worst_l = min(1.0, (max(0.0, backdrop.p95) ** 0.58) + 0.50 * backdrop.std)
+        worst_l = min(1.0, (max(0.0, backdrop.p95) ** gamma_exp) + (0.50 - 0.20 * w_trim) * backdrop.std)
     else:
         cal_text_l = max(0.01, min(vis.bg_l - 0.45, 0.05, 0.45 * vis.text_l + 0.55 * 0.04))
-        raw_bleed = 0.35 * backdrop.median + 0.65 * sample_low
-        dark_pull = (1.0 - max(0.0, min(1.0, raw_bleed))) ** 0.58
+        raw_bleed = w_med * backdrop.median + w_samp * sample_low
+        dark_pull = (1.0 - max(0.0, min(1.0, raw_bleed))) ** gamma_exp
         disturb_l = max(
             0.0,
-            1.0 - dark_pull - 0.45 * backdrop.std - 1.10 * backdrop.edge_energy,
+            1.0 - dark_pull - std_weight * backdrop.std - 1.10 * backdrop.edge_energy,
         )
-        worst_l = max(0.0, 1.0 - ((1.0 - max(0.0, min(1.0, backdrop.p5))) ** 0.58) - 0.50 * backdrop.std)
+        worst_l = max(0.0, 1.0 - ((1.0 - max(0.0, min(1.0, backdrop.p5))) ** gamma_exp) - (0.50 - 0.20 * w_trim) * backdrop.std)
 
     r_opaque = _ratio(cal_text_l, vis.bg_l)
-    scale_norm = max(1.0, 10.5 / max(1.0, r_opaque))
-    required_worst = max(2.5, effective_target * 0.68)
+    r_raw = _ratio(vis.text_l, vis.bg_l)
+    scale_norm = max(1.0, 10.5 / max(1.0, r_opaque), min(1.30, (0.75 * r_raw + 0.25 * r_opaque) / max(1.0, r_opaque)))
+    required_worst = max(2.2, effective_target * (0.68 - 0.10 * w_trim))
 
     # 5. Search for the lowest opacity 'a' in [floor, 1.0] that satisfies both:
     # - Primary criterion: Perceptual contrast against disturbing backdrop luminance >= effective_target

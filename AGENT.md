@@ -143,6 +143,10 @@ hyprsmart/
   - Dé-mélange analytique exact de l'alpha compositing inversant la transparence sans clignotement.
   - Profils génériques de classe (`CLASS_PROFILES`) actualisés par moyenne mobile (EMA $70/30$).
   - Régularisation adaptative et détection immédiate des changements de contenu (sites sombres/clairs).
+- [x] **Réévaluation Progressive & Profils Dynamiques Émergents (Terminé)** :
+  - Surveillance annulable sur `11` ticks d'une seconde (`reeval_max_ticks = 11`) avec arrêt anticipé après `8` ticks stables (`reeval_stable_ticks = 8`) pour les chargements asynchrones (navigateurs, Electron).
+  - Apprentissage temporel par classe (`volatility`, `settle_time`, `sample_count`) dans `profiles.json` et adaptation dynamique du budget d'échantillonnage.
+  - Court-circuit d'identité pixel $32 \times 32$ et contournement de régularisation sur inversion de polarité.
 - [ ] **Évolutions Futures** :
   - Détection automatique du fond d'écran via `hyprpaper`, `swww` ou `waypaper`.
   - Prise en compte du z-order pour les fenêtres superposées (multi-tuiles/flottantes).
@@ -163,9 +167,11 @@ hyprsmart/
   ```
 - **Gestion dynamique des paramètres (settings)** :
   ```bash
-  uv run hyprsmart settings                     # Lister tous les paramètres et valeurs
-  uv run hyprsmart settings video_opacity 0.98  # Configurer l'opacité vidéo
-  uv run hyprsmart settings target_contrast 5.0 # Configurer le contraste cible
+  uv run hyprsmart settings                         # Lister tous les paramètres et valeurs
+  uv run hyprsmart settings video_opacity 0.98      # Configurer l'opacité vidéo
+  uv run hyprsmart settings target_contrast 6.0     # Configurer le contraste cible
+  uv run hyprsmart settings reeval_max_ticks 11     # Nombre max de ticks de réévaluation progressive
+  uv run hyprsmart settings reeval_stable_ticks 8   # Ticks stables consécutifs avant arrêt anticipé
   ```
 - **Affichage des logs en direct** :
   ```bash
