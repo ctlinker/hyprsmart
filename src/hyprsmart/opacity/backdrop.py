@@ -78,38 +78,79 @@ def compute_sobel_energy(lum: np.ndarray) -> np.ndarray:
     return np.pad(mag, ((1, 1), (1, 1)), mode="edge").astype(np.float32)
 
 
-def load_wallpaper(path: str, monitor_w: int, monitor_h: int) -> np.ndarray:
-    """
-    Render a wallpaper in 'cover' mode, at reduced size (scaled down by DOWN),
-    and calculate its WCAG relative luminance.
-    """
-    img = Image.open(path).convert("RGB")
-    target_width = max(1, monitor_w // DOWN)
-    target_height = max(1, monitor_h // DOWN)
-
-    tw_scale = target_width / img.width
-    th_scale = target_height / img.height
+def _render_cover_frame(frame: Image.Image, target_width: int, target_height: int) -> np.ndarray:
+    rgb_img = frame.convert("RGB")
+    tw_scale = target_width / rgb_img.width
+    th_scale = target_height / rgb_img.height
     scale_fact = max(th_scale, tw_scale)
 
-    img = img.resize(
+    rgb_img = rgb_img.resize(
         (
-            round(img.width * scale_fact),
-            round(img.height * scale_fact),
+            round(rgb_img.width * scale_fact),
+            round(rgb_img.height * scale_fact),
         ),
         Image.LANCZOS,
     )
 
-    left = (img.width - target_width) // 2
-    top = (img.height - target_height) // 2
+    left = (rgb_img.width - target_width) // 2
+    top = (rgb_img.height - target_height) // 2
 
-    img = img.crop((
+    rgb_img = rgb_img.crop((
         left,
         top,
         left + target_width,
         top + target_height,
     ))
 
-    return _luminance(np.asarray(img, dtype=np.float32))
+    rgb_arr = np.asarray(rgb_img, dtype=np.float32)
+    lum = _luminance(rgb_arr)
+    # Account for Helmholtz-Kohlrausch chromatic salience on saturated wallpapers
+    # (e.g. bright red flowers have low BT.709 Y weight 0.2126 but strong visual salience;
+    # for neutral gray R=G=B, max_lin == lum so values are identical).
+    c = rgb_arr / 255.0
+    max_c = np.max(c, axis=2)
+    max_lin = np.where(
+        max_c <= 0.04045,
+        max_c / 12.92,
+        ((max_c + 0.055) / 1.055) ** 2.4,
+    ).astype(np.float32)
+    return (0.70 * lum + 0.30 * max_lin).astype(np.float32)
+
+
+def load_wallpaper(path: str, monitor_w: int, monitor_h: int) -> np.ndarray:
+    """
+    Render a wallpaper in 'cover' mode, at reduced size (scaled down by DOWN),
+    and calculate its WCAG relative luminance.
+    For animated wallpapers (e.g. .gif / .webp), averages evenly-spaced frames
+    across the animation to capture representative luminance rather than only frame 0.
+    """
+    target_width = max(1, monitor_w // DOWN)
+    target_height = max(1, monitor_h // DOWN)
+
+    with Image.open(path) as raw_img:
+        n_frames = int(getattr(raw_img, "n_frames", 1) or 1)
+        is_anim = bool(getattr(raw_img, "is_animated", False)) and n_frames > 1
+
+        if not is_anim:
+            return _render_cover_frame(raw_img, target_width, target_height)
+
+        sample_indices = np.unique(np.linspace(0, n_frames - 1, min(6, n_frames), dtype=int))
+        accum: np.ndarray | None = None
+        count = 0
+        for idx in sample_indices:
+            try:
+                raw_img.seek(int(idx))
+                frame_lum = _render_cover_frame(raw_img, target_width, target_height)
+                accum = frame_lum if accum is None else (accum + frame_lum)
+                count += 1
+            except EOFError:
+                break
+
+        if accum is not None and count > 0:
+            return (accum / float(count)).astype(np.float32)
+
+        raw_img.seek(0)
+        return _render_cover_frame(raw_img, target_width, target_height)
 
 
 def get_cached_wallpaper_backdrop_data(
@@ -189,16 +230,18 @@ def backdrop_behind(
     monitor_x: int,
     monitor_y: int,
     grad: np.ndarray | None = None,
+    monitor_scale: float = 1.0,
 ) -> Backdrop:
     """
     Extract the region of the monitor behind the passed window.
     Computes luminance percentiles and high-frequency edge energy.
     """
     h, w = lum.shape
-    x0 = max(0, min(w, int((win.x - monitor_x) // DOWN)))
-    y0 = max(0, min(h, int((win.y - monitor_y) // DOWN)))
-    x1 = max(0, min(w, int((win.x - monitor_x + win.width) // DOWN)))
-    y1 = max(0, min(h, int((win.y - monitor_y + win.height) // DOWN)))
+    scale = float(monitor_scale) if monitor_scale and monitor_scale > 0 else 1.0
+    x0 = max(0, min(w, int(round((win.x - monitor_x) * scale) // DOWN)))
+    y0 = max(0, min(h, int(round((win.y - monitor_y) * scale) // DOWN)))
+    x1 = max(0, min(w, int(round((win.x - monitor_x + win.width) * scale) // DOWN)))
+    y1 = max(0, min(h, int(round((win.y - monitor_y + win.height) * scale) // DOWN)))
 
     if x1 <= x0 or y1 <= y0:
         return Backdrop(

@@ -32,6 +32,12 @@ from .cache import (
     get_class_profile,
     record_applied_state,
 )
+from .dev_trace import (
+    get_dev_captures_dir,
+    is_dev_mode,
+    save_dev_decision_bundle,
+    set_dev_mode,
+)
 from .socket import HyprEvent
 
 CAPTURE_QUEUE = Queue()
@@ -112,6 +118,9 @@ def restore_all_managed_windows() -> None:
             print(f"[WARN] Failed to restore opacity for {addr}: {e}")
 
 
+DECISION_LOCK = Lock()
+
+
 def handle_event(ev: HyprEvent) -> None:
     if STOP_EVENT.is_set():
         return
@@ -131,8 +140,17 @@ def handle_event(ev: HyprEvent) -> None:
         # Focus switch: snappy reaction, instant cache hit path
         SCHEDULER.schedule("active_window", 0.05, schedule_capture, force=False)
     elif ev.kind == "windowtitlev2":
-        # Title changes (URL/tab change, buffer change): trailing settle delay then unblended capture
-        SCHEDULER.schedule("active_window", 0.25, schedule_capture, force=True)
+        # Title changes (URL/tab change, buffer change): only recapture if the title change
+        # belongs to the currently active window, ignoring unfocused background windows.
+        raw_addr = ev.content.strip().split(",", 1)[0].strip()
+        target_addr = raw_addr if raw_addr.startswith("0x") or not raw_addr else f"0x{raw_addr}"
+        SCHEDULER.schedule(
+            "active_window",
+            0.25,
+            schedule_capture,
+            force=True,
+            target_address=target_addr or None,
+        )
     elif ev.kind == "openwindow":
         # New window opening: wait for window painting to settle
         SCHEDULER.schedule("active_window", 0.50, schedule_capture, force=True)
@@ -145,11 +163,14 @@ def force_schedule_capture() -> None:
     schedule_capture(force=True)
 
 
-def schedule_capture(force: bool = False) -> None:
+def schedule_capture(force: bool = False, target_address: str | None = None) -> None:
     if STOP_EVENT.is_set():
         return
     win = get_hyprland_active_window()
     if win is None:
+        return
+    if target_address is not None and win.address != target_address:
+        # Ignore title change events emitted by unfocused background windows
         return
     if not force and (e := cache_get(win)):
         CACHE_HIT_QUEUE.put((win, e))
@@ -165,8 +186,10 @@ def capture_worker() -> None:
             continue
 
         try:
+            # Snapshot the window's applied alpha at the exact time of screenshot capture
+            alpha_at_capture = get_applied_alpha(win.address)
             img = capture_window(win)
-            LUMINANCE_QUEUE.put((win, img))
+            LUMINANCE_QUEUE.put((win, img, alpha_at_capture))
         except Exception as e:
             print(f"[WARN] Failed to capture window {win.address}: {e}")
         finally:
@@ -180,71 +203,146 @@ def apply_window_decision(
     backdrop: Backdrop | None = None,
     monitor: Monitor | None = None,
     is_preload: bool = False,
+    before_img_bytes: bytes | None = None,
+    class_profile_before: WindowVisuals | None = None,
+    class_profile_after: WindowVisuals | None = None,
 ) -> None:
-    mon = monitor
-    if mon is None:
-        # Try matching window monitor_id
-        try:
-            mons = get_hyprland_monitors()
-            mon = next((m for m in mons if m.id == win.monitor_id), None)
-        except Exception:
-            mon = None
+    with DECISION_LOCK:
+        mon = monitor
+        if mon is None:
+            # Try matching window monitor_id
+            try:
+                mons = get_hyprland_monitors()
+                mon = next((m for m in mons if m.id == win.monitor_id), None)
+            except Exception:
+                mon = None
 
-    if mon is None:
-        mon = get_hyprland_active_monitor()
+        if mon is None:
+            mon = get_hyprland_active_monitor()
 
-    if mon is None:
-        return
+        if mon is None:
+            return
 
-    cfg = get_current_config()
-    is_video, v_score, _ = evaluate_video_score(win, visuals)
+        cfg = get_current_config()
+        wall_path = cfg.get_wallpaper(mon.name, mon.id)
+        is_video, v_score, v_signals = evaluate_video_score(win, visuals)
 
-    b = backdrop
-    if is_video:
-        ideal_alpha = cfg.video_opacity
-    else:
-        if b is None:
-            wall_path = cfg.get_wallpaper(mon.name, mon.id)
+        b = backdrop
+        if b is None and (not is_video or is_dev_mode()):
             wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
-            b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad)
+            b = backdrop_behind(
+                wall_lum,
+                win,
+                mon.x,
+                mon.y,
+                grad=wall_grad,
+                monitor_scale=mon.scale,
+            )
 
-        ideal_alpha = decide_opacity(
-            visuals,
-            b,
-            target=cfg.target_contrast,
-            floor=cfg.floor_opacity,
-        )
+        if is_video:
+            ideal_alpha = cfg.video_opacity
+        else:
+            ideal_alpha = decide_opacity(
+                visuals,
+                b,
+                target=cfg.target_contrast,
+                floor=cfg.floor_opacity,
+            )
 
-    # Opacity diffing: check if current opacity is already appropriate
-    with MANAGED_LOCK:
-        is_already_managed = win.address in MANAGED_WINDOWS
+        # Opacity diffing: check if current opacity is already appropriate
+        with MANAGED_LOCK:
+            is_already_managed = win.address in MANAGED_WINDOWS
 
-    current_alpha = get_applied_alpha(win.address)
-    alpha_diff = abs(ideal_alpha - current_alpha)
-    backdrop_sig = (b.p15, b.p85, b.edge_energy) if b is not None else None
-    geom = (int(win.x), int(win.y), int(win.width), int(win.height))
+        current_alpha = get_applied_alpha(win.address)
+        alpha_diff = abs(ideal_alpha - current_alpha)
+        backdrop_sig = (b.p15, b.p85, b.edge_energy) if b is not None else None
+        geom = (int(win.x), int(win.y), int(win.width), int(win.height))
 
-    if is_already_managed and alpha_diff < DIFF_OPACITY_THRESHOLD:
-        record_applied_state(win.address, current_alpha, backdrop_sig, geom)
-        return
+        dev_active = is_dev_mode()
 
-    # Apply new opacity
-    tag = "[PRELOAD]" if is_preload else "[DECIDE]"
-    if is_video:
-        prefix = " (cache hit - VIDEO)" if from_cache else " (VIDEO DETECTED)"
-        print(f"{tag}{prefix} alpha: {ideal_alpha:.2f} (S={v_score:.2f}) for {win.address}")
-    else:
-        prefix = " (cache hit) " if from_cache else " "
-        print(
-            f"{tag}{prefix}alpha: {ideal_alpha:.2f} "
-            f"(text_dens={visuals.text_density:.2f}, bg_ratio={visuals.bg_ratio:.2f}, wall_edge={b.edge_energy:.3f}) "
-            f"for {win.address}"
-        )
+        if is_already_managed and alpha_diff < DIFF_OPACITY_THRESHOLD:
+            record_applied_state(win.address, current_alpha, backdrop_sig, geom)
+            if dev_active and not is_preload and before_img_bytes is not None:
+                save_dev_decision_bundle(
+                    win=win,
+                    mon=mon,
+                    cfg=cfg,
+                    wall_path=wall_path,
+                    visuals=visuals,
+                    backdrop=b,
+                    before_alpha=current_alpha,
+                    after_alpha=ideal_alpha,
+                    applied_ipc=False,
+                    from_cache=from_cache,
+                    is_preload=is_preload,
+                    is_video=is_video,
+                    video_score=v_score,
+                    video_signals=v_signals,
+                    before_img_bytes=before_img_bytes,
+                    after_img_bytes=before_img_bytes,
+                    class_profile_before=class_profile_before,
+                    class_profile_after=class_profile_after,
+                )
+            return
 
+        # If in dev mode on a cache hit where before_img_bytes wasn't captured yet, capture before.png now
+        if dev_active and before_img_bytes is None and not is_preload:
+            try:
+                before_img_bytes = capture_window(win)
+            except Exception:
+                before_img_bytes = None
 
-    set_hyprland_win_opacity(win.address, ideal_alpha, ideal_alpha)
-    record_applied_state(win.address, ideal_alpha, backdrop_sig, geom)
-    record_managed_window(win.address)
+        # Apply new opacity
+        tag = "[PRELOAD]" if is_preload else "[DECIDE]"
+        if is_video:
+            prefix = " (cache hit - VIDEO)" if from_cache else " (VIDEO DETECTED)"
+            print(f"{tag}{prefix} alpha: {ideal_alpha:.2f} (S={v_score:.2f}) for {win.address}")
+        else:
+            prefix = " (cache hit) " if from_cache else " "
+            print(
+                f"{tag}{prefix}alpha: {ideal_alpha:.2f} "
+                f"(text_dens={visuals.text_density:.2f}, bg_ratio={visuals.bg_ratio:.2f}, wall_edge={b.edge_energy:.3f}) "
+                f"for {win.address}"
+            )
+
+        set_hyprland_win_opacity(win.address, ideal_alpha, ideal_alpha)
+        record_applied_state(win.address, ideal_alpha, backdrop_sig, geom)
+        record_managed_window(win.address)
+
+        if dev_active and not is_preload:
+            after_img_bytes: bytes | None = None
+            try:
+                # Allow compositor to render the newly dispatched opacity before capturing after.png
+                time.sleep(0.08)
+                after_img_bytes = capture_window(win)
+            except Exception as e:
+                print(f"[WARN] Failed to capture after.png for {win.address}: {e}")
+
+            if class_profile_before is None and win.window_class:
+                class_profile_before = get_class_profile(win.window_class)
+            if class_profile_after is None and win.window_class:
+                class_profile_after = get_class_profile(win.window_class)
+
+            save_dev_decision_bundle(
+                win=win,
+                mon=mon,
+                cfg=cfg,
+                wall_path=wall_path,
+                visuals=visuals,
+                backdrop=b,
+                before_alpha=current_alpha,
+                after_alpha=ideal_alpha,
+                applied_ipc=True,
+                from_cache=from_cache,
+                is_preload=is_preload,
+                is_video=is_video,
+                video_score=v_score,
+                video_signals=v_signals,
+                before_img_bytes=before_img_bytes,
+                after_img_bytes=after_img_bytes,
+                class_profile_before=class_profile_before,
+                class_profile_after=class_profile_after,
+            )
 
 
 def cache_hit_worker() -> None:
@@ -265,32 +363,61 @@ def cache_hit_worker() -> None:
 def luminance_worker() -> None:
     while not STOP_EVENT.is_set():
         try:
-            win, img = LUMINANCE_QUEUE.get(timeout=1.0)
+            item = LUMINANCE_QUEUE.get(timeout=1.0)
         except Empty:
             continue
 
         try:
-            mon = get_hyprland_active_monitor()
+            if len(item) == 3:
+                win, img, captured_alpha = item
+            else:
+                win, img = item
+                captured_alpha = get_applied_alpha(win.address)
+
+            mon = None
+            try:
+                mons = get_hyprland_monitors()
+                mon = next((m for m in mons if m.id == win.monitor_id), None)
+            except Exception:
+                mon = None
+            if mon is None:
+                mon = get_hyprland_active_monitor()
             if mon is None:
                 continue
 
             cfg = get_current_config()
             wall_path = cfg.get_wallpaper(mon.name, mon.id)
             wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
-            b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad)
+            b = backdrop_behind(
+                wall_lum,
+                win,
+                mon.x,
+                mon.y,
+                grad=wall_grad,
+                monitor_scale=mon.scale,
+            )
 
-            current_alpha = get_applied_alpha(win.address)
             class_ref = get_class_profile(win.window_class)
 
-            # Optical unblending: reconstruct true window content
+            # Optical unblending using the exact alpha active when the screenshot was captured
             visuals = window_colors(
                 img,
-                current_alpha=current_alpha,
+                current_alpha=captured_alpha,
                 backdrop_median=b.median,
                 class_ref=class_ref,
             )
-            cache_put(win, visuals)
-            apply_window_decision(win, visuals, from_cache=False, backdrop=b)
+            cache_put(win, visuals, captured_alpha=captured_alpha)
+            updated_class_ref = get_class_profile(win.window_class)
+            apply_window_decision(
+                win,
+                visuals,
+                from_cache=False,
+                backdrop=b,
+                monitor=mon,
+                before_img_bytes=img,
+                class_profile_before=class_ref,
+                class_profile_after=updated_class_ref,
+            )
         except Exception as e:
             print(f"[WARN] Error in luminance_worker: {e}")
         finally:
@@ -298,7 +425,7 @@ def luminance_worker() -> None:
 
 
 def preload_all_windows() -> None:
-    """Preload and apply opacity to all mapped windows using cached class profiles."""
+    """Preload and apply opacity to all mapped windows using cached window/class profiles."""
     if STOP_EVENT.is_set():
         return
     try:
@@ -313,7 +440,8 @@ def preload_all_windows() -> None:
         for win in all_windows:
             if STOP_EVENT.is_set():
                 break
-            profile = get_class_profile(win.window_class)
+            cached = cache_get(win)
+            profile = cached.visuals if cached is not None else get_class_profile(win.window_class)
             if profile is None:
                 continue
 
@@ -322,9 +450,39 @@ def preload_all_windows() -> None:
             count_preloaded += 1
 
         if count_preloaded > 0:
-            print(f"[INFO] Preloaded profiles for {count_preloaded} window(s) across workspaces")
+            print(f"[INFO] Applied decisions to {count_preloaded} window(s) across workspaces")
     except Exception as e:
         print(f"[WARN] Error during window profile preloading: {e}")
+
+
+def config_watcher_worker() -> None:
+    """Watch config.yaml for live edits and re-evaluate all open windows when settings change."""
+    from hyprsmart.config import CONFIG_FILE, load_config
+
+    try:
+        last_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
+    except OSError:
+        last_mtime = None
+
+    while not STOP_EVENT.is_set():
+        time.sleep(0.5)
+        try:
+            if CONFIG_FILE.exists():
+                mtime = CONFIG_FILE.stat().st_mtime
+                if last_mtime is not None and mtime != last_mtime:
+                    last_mtime = mtime
+                    cfg = load_config()
+                    print(
+                        f"[INFO] Reloaded config.yaml "
+                        f"(target_contrast={cfg.target_contrast}, floor_opacity={cfg.floor_opacity}, "
+                        f"video_opacity={cfg.video_opacity})"
+                    )
+                    preload_all_windows()
+                    force_schedule_capture()
+                elif last_mtime is None:
+                    last_mtime = mtime
+        except Exception as e:
+            print(f"[WARN] Error in config_watcher_worker: {e}")
 
 
 def load_hyprsmart_daemons() -> None:
@@ -332,6 +490,7 @@ def load_hyprsmart_daemons() -> None:
     Thread(target=capture_worker, daemon=True).start()
     Thread(target=cache_hit_worker, daemon=True).start()
     Thread(target=luminance_worker, daemon=True).start()
+    Thread(target=config_watcher_worker, daemon=True).start()
     print("[INFO] Started HyprSmart workers")
     # Preload profiles for all existing windows immediately
     Thread(target=preload_all_windows, daemon=True).start()

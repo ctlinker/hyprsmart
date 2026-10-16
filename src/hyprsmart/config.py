@@ -24,14 +24,17 @@ class HyprsmartConfig:
         return self.default_wallpaper
 
 _CURRENT_CONFIG: HyprsmartConfig | None = None
+_CONFIG_MTIME: float | None = None
 
 def load_config() -> HyprsmartConfig:
-    global _CURRENT_CONFIG
+    global _CURRENT_CONFIG, _CONFIG_MTIME
     if not CONFIG_FILE.exists():
         _CURRENT_CONFIG = HyprsmartConfig()
+        _CONFIG_MTIME = None
         return _CURRENT_CONFIG
 
     try:
+        _CONFIG_MTIME = CONFIG_FILE.stat().st_mtime
         data = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) or {}
         _CURRENT_CONFIG = HyprsmartConfig(
             monitors={str(k): str(v) for k, v in data.get("monitors", {}).items()},
@@ -48,13 +51,20 @@ def load_config() -> HyprsmartConfig:
     return _CURRENT_CONFIG
 
 def get_current_config() -> HyprsmartConfig:
-    global _CURRENT_CONFIG
+    global _CURRENT_CONFIG, _CONFIG_MTIME
     if _CURRENT_CONFIG is None:
         return load_config()
+    try:
+        if CONFIG_FILE.exists():
+            mtime = CONFIG_FILE.stat().st_mtime
+            if _CONFIG_MTIME is None or mtime != _CONFIG_MTIME:
+                return load_config()
+    except OSError:
+        pass
     return _CURRENT_CONFIG
 
 def save_config(cfg: HyprsmartConfig) -> None:
-    global _CURRENT_CONFIG
+    global _CURRENT_CONFIG, _CONFIG_MTIME
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     data = {
         "monitors": cfg.monitors,
@@ -65,6 +75,10 @@ def save_config(cfg: HyprsmartConfig) -> None:
         "debounce_interval": cfg.debounce_interval,
     }
     CONFIG_FILE.write_text(yaml.dump(data, sort_keys=False), encoding="utf-8")
+    try:
+        _CONFIG_MTIME = CONFIG_FILE.stat().st_mtime
+    except OSError:
+        pass
     _CURRENT_CONFIG = cfg
 
 def set_monitor_wallpaper(mon_id_or_name: str, wall_path: str) -> HyprsmartConfig:
