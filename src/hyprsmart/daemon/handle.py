@@ -1,6 +1,12 @@
+from dataclasses import dataclass
+import io
 import time
 from queue import Queue, Empty
 from threading import Thread, Timer, Event, Lock
+from typing import Any
+
+import numpy as np
+from PIL import Image
 
 from hyprsmart.config import get_current_config
 from hyprsmart.opacity import (
@@ -9,6 +15,7 @@ from hyprsmart.opacity import (
     decide_opacity,
     evaluate_video_score,
     get_cached_wallpaper_backdrop_data,
+    visual_delta,
     window_colors,
     WindowVisuals,
 )
@@ -28,9 +35,17 @@ from .cache import (
     cache_drop,
     cache_get,
     cache_put,
+    get_adaptive_reeval_budget,
     get_applied_alpha,
     get_class_profile,
     record_applied_state,
+    record_class_probing_session,
+)
+from .dev_trace import (
+    get_dev_captures_dir,
+    is_dev_mode,
+    save_dev_decision_bundle,
+    set_dev_mode,
 )
 from .socket import HyprEvent
 
@@ -44,6 +59,18 @@ MANAGED_LOCK = Lock()
 STOP_EVENT = Event()
 
 DIFF_OPACITY_THRESHOLD: float = 0.03
+PROGRESSIVE_DELTA_THRESHOLD: float = 0.03
+
+
+def _quick_thumbnail_array(img_bytes: bytes | None) -> np.ndarray | None:
+    """Decode PNG bytes into a tiny 32x32 int16 RGB array for fast pixel-identity comparison."""
+    if not img_bytes:
+        return None
+    try:
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGB").resize((32, 32), Image.Resampling.NEAREST)
+        return np.asarray(img, dtype=np.int16)
+    except Exception:
+        return None
 
 
 class DebouncedScheduler:
@@ -93,6 +120,304 @@ class DebouncedScheduler:
 SCHEDULER = DebouncedScheduler()
 
 
+@dataclass
+class ProgressiveSession:
+    address: str
+    window_class: str
+    title_at_start: str
+    max_ticks: int
+    stable_ticks_target: int
+    interval: float
+    current_tick: int = 0
+    stable_ticks: int = 0
+    last_change_tick: int = 0
+    max_delta: float = 0.0
+    initial_visuals: WindowVisuals | None = None
+    last_visuals: WindowVisuals | None = None
+    last_thumb_arr: np.ndarray | None = None
+    last_geom: tuple[int, int, int, int] | None = None
+    last_alpha: float = 1.0
+    cancelled: bool = False
+
+
+class ProgressiveReevaluator:
+    """
+    Manages cancelable multi-second progressive re-evaluation sessions (default 11 ticks @ 1.0s,
+    early-stopping after 8 consecutive stable ticks) to track slow-loading windows (e.g. browsers)
+    and learn an emergent dynamic class profile (volatility & settle_time).
+    """
+    TIMER_KEY = "progressive_reeval"
+
+    def __init__(self, scheduler: DebouncedScheduler) -> None:
+        self._scheduler = scheduler
+        self._lock = Lock()
+        self._active_session: ProgressiveSession | None = None
+
+    @property
+    def active_session(self) -> ProgressiveSession | None:
+        with self._lock:
+            return self._active_session
+
+    def cancel(self, address: str | None = None, commit_partial: bool = False) -> None:
+        session_to_commit: ProgressiveSession | None = None
+        with self._lock:
+            if self._active_session is None:
+                return
+            if address is not None and self._active_session.address != address:
+                return
+            self._active_session.cancelled = True
+            if commit_partial and self._active_session.current_tick >= 1 and self._active_session.last_visuals is not None:
+                session_to_commit = self._active_session
+            self._active_session = None
+            self._scheduler.cancel(self.TIMER_KEY)
+
+        if session_to_commit is not None and session_to_commit.window_class:
+            settle_sec = session_to_commit.last_change_tick * session_to_commit.interval
+            record_class_probing_session(
+                session_to_commit.window_class,
+                session_to_commit.last_visuals,
+                max_delta=session_to_commit.max_delta,
+                settle_time_sec=settle_sec,
+                captured_alpha=session_to_commit.last_alpha,
+            )
+
+    def start_session(
+        self,
+        win: Window,
+        initial_visuals: WindowVisuals | None = None,
+        initial_thumb: np.ndarray | None = None,
+        initial_alpha: float = 1.0,
+    ) -> ProgressiveSession | None:
+        if STOP_EVENT.is_set():
+            return None
+
+        cfg = get_current_config()
+        max_ticks, stable_target = get_adaptive_reeval_budget(
+            win.window_class,
+            max_ticks_cfg=cfg.reeval_max_ticks,
+            stable_ticks_cfg=cfg.reeval_stable_ticks,
+        )
+        if max_ticks <= 0:
+            self.cancel()
+            return None
+
+        interval = max(0.1, float(cfg.reeval_interval))
+        geom = (int(win.x), int(win.y), int(win.width), int(win.height))
+
+        session = ProgressiveSession(
+            address=win.address,
+            window_class=win.window_class,
+            title_at_start=win.title,
+            max_ticks=max_ticks,
+            stable_ticks_target=stable_target,
+            interval=interval,
+            initial_visuals=initial_visuals,
+            last_visuals=initial_visuals,
+            last_thumb_arr=initial_thumb,
+            last_geom=geom,
+            last_alpha=initial_alpha,
+        )
+
+        with self._lock:
+            if self._active_session is not None:
+                self._active_session.cancelled = True
+            self._active_session = session
+            self._scheduler.schedule(self.TIMER_KEY, interval, self.step_tick, session)
+
+        return session
+
+    def _finalize_session(
+        self,
+        session: ProgressiveSession,
+        win: Window,
+        final_visuals: WindowVisuals | None,
+        captured_alpha: float,
+    ) -> None:
+        with self._lock:
+            if self._active_session is session:
+                self._active_session = None
+            session.cancelled = True
+
+        if final_visuals is None:
+            return
+
+        if session.initial_visuals is not None:
+            overall_shift = visual_delta(final_visuals, session.initial_visuals)
+            session.max_delta = max(session.max_delta, overall_shift)
+
+        settle_sec = session.last_change_tick * session.interval
+        updated_prof = record_class_probing_session(
+            win.window_class,
+            final_visuals,
+            max_delta=session.max_delta,
+            settle_time_sec=settle_sec,
+            captured_alpha=captured_alpha,
+        )
+        vol_disp = updated_prof.volatility if updated_prof else session.max_delta
+        settle_disp = updated_prof.settle_time if updated_prof else settle_sec
+        print(
+            f"[PROGRESSIVE] Settled '{win.window_class or win.address}' at tick {session.current_tick}/{session.max_ticks} "
+            f"(stable={session.stable_ticks}/{session.stable_ticks_target}, max_delta={session.max_delta:.3f}, "
+            f"class_vol={vol_disp:.3f}, class_settle={settle_disp:.1f}s)"
+        )
+
+    def step_tick(self, session: ProgressiveSession) -> bool:
+        """
+        Execute a single progressive re-evaluation tick.
+        Returns True if the session remains active and scheduled the next tick, False if finished/cancelled.
+        """
+        if STOP_EVENT.is_set() or session.cancelled:
+            return False
+
+        with self._lock:
+            if self._active_session is not session:
+                return False
+
+        win = get_hyprland_active_window()
+        if win is None or win.address != session.address:
+            # Focus moved away or window closed -> cancel and commit partial observation
+            self.cancel(session.address, commit_partial=True)
+            return False
+
+        session.current_tick += 1
+        try:
+            captured_alpha = get_applied_alpha(win.address)
+            img = capture_window(win)
+        except Exception as e:
+            print(f"[WARN] Progressive capture failed at tick {session.current_tick} for {win.address}: {e}")
+            self.cancel(session.address, commit_partial=True)
+            return False
+
+        geom = (int(win.x), int(win.y), int(win.width), int(win.height))
+        thumb = _quick_thumbnail_array(img)
+
+        # Fast pixel-identity short-circuit: skip Sobel/quantization/IPC if pixels and geometry are identical
+        if (
+            session.last_thumb_arr is not None
+            and thumb is not None
+            and thumb.shape == session.last_thumb_arr.shape
+            and geom == session.last_geom
+            and int(np.max(np.abs(thumb - session.last_thumb_arr))) < 1
+        ):
+            session.stable_ticks += 1
+            if session.stable_ticks >= session.stable_ticks_target or session.current_tick >= session.max_ticks:
+                self._finalize_session(session, win, session.last_visuals, captured_alpha)
+                return False
+
+            with self._lock:
+                if not session.cancelled and self._active_session is session:
+                    self._scheduler.schedule(self.TIMER_KEY, session.interval, self.step_tick, session)
+                    return True
+            return False
+
+        # Resolve monitor and backdrop
+        mon = None
+        try:
+            mons = get_hyprland_monitors()
+            mon = next((m for m in mons if m.id == win.monitor_id), None)
+        except Exception:
+            mon = None
+        if mon is None:
+            mon = get_hyprland_active_monitor()
+        if mon is None:
+            self.cancel(session.address, commit_partial=True)
+            return False
+
+        cfg = get_current_config()
+        wall_path = cfg.get_wallpaper(mon.name, mon.id)
+        wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
+        b = backdrop_behind(
+            wall_lum,
+            win,
+            mon.x,
+            mon.y,
+            grad=wall_grad,
+            monitor_scale=mon.scale,
+        )
+
+        class_ref = get_class_profile(win.window_class)
+        visuals = window_colors(
+            img,
+            current_alpha=captured_alpha,
+            backdrop_median=b.median,
+            class_ref=class_ref,
+        )
+
+        # Safeguard: if video playback is detected, apply video_opacity and stop UI volatility probing
+        is_video, _, _ = evaluate_video_score(win, visuals)
+        if is_video:
+            cache_put(win, visuals, captured_alpha=captured_alpha, update_class=False)
+            apply_window_decision(
+                win,
+                visuals,
+                from_cache=False,
+                backdrop=b,
+                monitor=mon,
+                before_img_bytes=img,
+                class_profile_before=class_ref,
+                class_profile_after=class_ref,
+            )
+            self.cancel(session.address, commit_partial=False)
+            return False
+
+        if session.last_visuals is not None:
+            delta = visual_delta(visuals, session.last_visuals)
+        else:
+            delta = 0.0
+            session.initial_visuals = visuals
+
+        geom_changed = session.last_geom is not None and geom != session.last_geom
+        session.last_visuals = visuals
+        session.last_thumb_arr = thumb
+        session.last_geom = geom
+
+        # Update instance cache immediately, but defer persistent class EMA update until convergence
+        cache_put(win, visuals, captured_alpha=captured_alpha, update_class=False)
+
+        if delta >= PROGRESSIVE_DELTA_THRESHOLD:
+            session.stable_ticks = 0
+            session.last_change_tick = session.current_tick
+            session.max_delta = max(session.max_delta, delta)
+            apply_window_decision(
+                win,
+                visuals,
+                from_cache=False,
+                backdrop=b,
+                monitor=mon,
+                before_img_bytes=img,
+                class_profile_before=class_ref,
+                class_profile_after=class_ref,
+            )
+            session.last_alpha = get_applied_alpha(win.address)
+        else:
+            session.stable_ticks += 1
+            if geom_changed:
+                apply_window_decision(
+                    win,
+                    visuals,
+                    from_cache=True,
+                    backdrop=b,
+                    monitor=mon,
+                    before_img_bytes=img,
+                    class_profile_before=class_ref,
+                    class_profile_after=class_ref,
+                )
+                session.last_alpha = get_applied_alpha(win.address)
+
+        if session.stable_ticks >= session.stable_ticks_target or session.current_tick >= session.max_ticks:
+            self._finalize_session(session, win, visuals, session.last_alpha)
+            return False
+
+        with self._lock:
+            if not session.cancelled and self._active_session is session:
+                self._scheduler.schedule(self.TIMER_KEY, session.interval, self.step_tick, session)
+                return True
+        return False
+
+
+PROGRESSIVE = ProgressiveReevaluator(SCHEDULER)
+
+
 def record_managed_window(address: str) -> None:
     with MANAGED_LOCK:
         MANAGED_WINDOWS.add(address)
@@ -112,6 +437,9 @@ def restore_all_managed_windows() -> None:
             print(f"[WARN] Failed to restore opacity for {addr}: {e}")
 
 
+DECISION_LOCK = Lock()
+
+
 def handle_event(ev: HyprEvent) -> None:
     if STOP_EVENT.is_set():
         return
@@ -120,6 +448,7 @@ def handle_event(ev: HyprEvent) -> None:
         addr = ev.content.strip().split(",")[0]
         if not addr.startswith("0x"):
             addr = f"0x{addr}"
+        PROGRESSIVE.cancel(addr, commit_partial=False)
         SCHEDULER.cancel(addr)
         cache_drop(addr)
         with MANAGED_LOCK:
@@ -128,45 +457,84 @@ def handle_event(ev: HyprEvent) -> None:
 
     # Delays for trailing debounce
     if ev.kind == "activewindowv2":
+        # Cancel any progressive session belonging to a previously focused window
+        raw_addr = ev.content.strip().split(",", 1)[0].strip()
+        focused_addr = raw_addr if raw_addr.startswith("0x") or not raw_addr else f"0x{raw_addr}"
+        active_sess = PROGRESSIVE.active_session
+        if active_sess is not None and focused_addr and active_sess.address != focused_addr:
+            PROGRESSIVE.cancel(active_sess.address, commit_partial=True)
         # Focus switch: snappy reaction, instant cache hit path
-        SCHEDULER.schedule("active_window", 0.05, schedule_capture, force=False)
+        SCHEDULER.schedule("active_window", 0.05, schedule_capture, force=False, progressive=True)
     elif ev.kind == "windowtitlev2":
-        # Title changes (URL/tab change, buffer change): trailing settle delay then unblended capture
-        SCHEDULER.schedule("active_window", 0.25, schedule_capture, force=True)
+        # Title changes (URL/tab change, buffer change): only recapture if the title change
+        # belongs to the currently active window, ignoring unfocused background windows.
+        raw_addr = ev.content.strip().split(",", 1)[0].strip()
+        target_addr = raw_addr if raw_addr.startswith("0x") or not raw_addr else f"0x{raw_addr}"
+        SCHEDULER.schedule(
+            "active_window",
+            0.25,
+            schedule_capture,
+            force=True,
+            target_address=target_addr or None,
+            progressive=True,
+        )
     elif ev.kind == "openwindow":
-        # New window opening: wait for window painting to settle
-        SCHEDULER.schedule("active_window", 0.50, schedule_capture, force=True)
+        # New window opening: wait for window painting to settle, then start progressive re-evaluation
+        SCHEDULER.schedule("active_window", 0.50, schedule_capture, force=True, progressive=True)
     elif ev.kind in ("fullscreen", "movewindowv2"):
         # Geometry changes: fast backdrop slice recalculation
-        SCHEDULER.schedule("active_window", 0.08, schedule_capture, force=False)
+        SCHEDULER.schedule("active_window", 0.08, schedule_capture, force=False, progressive=False)
 
 
 def force_schedule_capture() -> None:
-    schedule_capture(force=True)
+    schedule_capture(force=True, progressive=True)
 
 
-def schedule_capture(force: bool = False) -> None:
+def schedule_capture(
+    force: bool = False,
+    target_address: str | None = None,
+    progressive: bool = False,
+) -> None:
     if STOP_EVENT.is_set():
         return
     win = get_hyprland_active_window()
     if win is None:
         return
+    if target_address is not None and win.address != target_address:
+        # Ignore title change events emitted by unfocused background windows
+        return
     if not force and (e := cache_get(win)):
         CACHE_HIT_QUEUE.put((win, e))
+        if progressive:
+            prof = get_class_profile(win.window_class)
+            # If the window class is known to be volatile (e.g. browser), run progressive probing
+            if prof is not None and prof.volatility >= 0.06:
+                PROGRESSIVE.start_session(
+                    win,
+                    initial_visuals=e.visuals,
+                    initial_alpha=get_applied_alpha(win.address),
+                )
         return
-    CAPTURE_QUEUE.put(win)
+    CAPTURE_QUEUE.put((win, progressive))
 
 
 def capture_worker() -> None:
     while not STOP_EVENT.is_set():
         try:
-            win = CAPTURE_QUEUE.get(timeout=1.0)
+            item = CAPTURE_QUEUE.get(timeout=1.0)
         except Empty:
             continue
 
+        if isinstance(item, tuple):
+            win, progressive = item
+        else:
+            win, progressive = item, False
+
         try:
+            # Snapshot the window's applied alpha at the exact time of screenshot capture
+            alpha_at_capture = get_applied_alpha(win.address)
             img = capture_window(win)
-            LUMINANCE_QUEUE.put((win, img))
+            LUMINANCE_QUEUE.put((win, img, alpha_at_capture, progressive))
         except Exception as e:
             print(f"[WARN] Failed to capture window {win.address}: {e}")
         finally:
@@ -180,71 +548,146 @@ def apply_window_decision(
     backdrop: Backdrop | None = None,
     monitor: Monitor | None = None,
     is_preload: bool = False,
+    before_img_bytes: bytes | None = None,
+    class_profile_before: WindowVisuals | None = None,
+    class_profile_after: WindowVisuals | None = None,
 ) -> None:
-    mon = monitor
-    if mon is None:
-        # Try matching window monitor_id
-        try:
-            mons = get_hyprland_monitors()
-            mon = next((m for m in mons if m.id == win.monitor_id), None)
-        except Exception:
-            mon = None
+    with DECISION_LOCK:
+        mon = monitor
+        if mon is None:
+            # Try matching window monitor_id
+            try:
+                mons = get_hyprland_monitors()
+                mon = next((m for m in mons if m.id == win.monitor_id), None)
+            except Exception:
+                mon = None
 
-    if mon is None:
-        mon = get_hyprland_active_monitor()
+        if mon is None:
+            mon = get_hyprland_active_monitor()
 
-    if mon is None:
-        return
+        if mon is None:
+            return
 
-    cfg = get_current_config()
-    is_video, v_score, _ = evaluate_video_score(win, visuals)
+        cfg = get_current_config()
+        wall_path = cfg.get_wallpaper(mon.name, mon.id)
+        is_video, v_score, v_signals = evaluate_video_score(win, visuals)
 
-    b = backdrop
-    if is_video:
-        ideal_alpha = cfg.video_opacity
-    else:
-        if b is None:
-            wall_path = cfg.get_wallpaper(mon.name, mon.id)
+        b = backdrop
+        if b is None and (not is_video or is_dev_mode()):
             wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
-            b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad)
+            b = backdrop_behind(
+                wall_lum,
+                win,
+                mon.x,
+                mon.y,
+                grad=wall_grad,
+                monitor_scale=mon.scale,
+            )
 
-        ideal_alpha = decide_opacity(
-            visuals,
-            b,
-            target=cfg.target_contrast,
-            floor=cfg.floor_opacity,
-        )
+        if is_video:
+            ideal_alpha = cfg.video_opacity
+        else:
+            ideal_alpha = decide_opacity(
+                visuals,
+                b,
+                target=cfg.target_contrast,
+                floor=cfg.floor_opacity,
+            )
 
-    # Opacity diffing: check if current opacity is already appropriate
-    with MANAGED_LOCK:
-        is_already_managed = win.address in MANAGED_WINDOWS
+        # Opacity diffing: check if current opacity is already appropriate
+        with MANAGED_LOCK:
+            is_already_managed = win.address in MANAGED_WINDOWS
 
-    current_alpha = get_applied_alpha(win.address)
-    alpha_diff = abs(ideal_alpha - current_alpha)
-    backdrop_sig = (b.p15, b.p85, b.edge_energy) if b is not None else None
-    geom = (int(win.x), int(win.y), int(win.width), int(win.height))
+        current_alpha = get_applied_alpha(win.address)
+        alpha_diff = abs(ideal_alpha - current_alpha)
+        backdrop_sig = (b.p15, b.p85, b.edge_energy) if b is not None else None
+        geom = (int(win.x), int(win.y), int(win.width), int(win.height))
 
-    if is_already_managed and alpha_diff < DIFF_OPACITY_THRESHOLD:
-        record_applied_state(win.address, current_alpha, backdrop_sig, geom)
-        return
+        dev_active = is_dev_mode()
 
-    # Apply new opacity
-    tag = "[PRELOAD]" if is_preload else "[DECIDE]"
-    if is_video:
-        prefix = " (cache hit - VIDEO)" if from_cache else " (VIDEO DETECTED)"
-        print(f"{tag}{prefix} alpha: {ideal_alpha:.2f} (S={v_score:.2f}) for {win.address}")
-    else:
-        prefix = " (cache hit) " if from_cache else " "
-        print(
-            f"{tag}{prefix}alpha: {ideal_alpha:.2f} "
-            f"(text_dens={visuals.text_density:.2f}, bg_ratio={visuals.bg_ratio:.2f}, wall_edge={b.edge_energy:.3f}) "
-            f"for {win.address}"
-        )
+        if is_already_managed and alpha_diff < DIFF_OPACITY_THRESHOLD:
+            record_applied_state(win.address, current_alpha, backdrop_sig, geom)
+            if dev_active and not is_preload and before_img_bytes is not None:
+                save_dev_decision_bundle(
+                    win=win,
+                    mon=mon,
+                    cfg=cfg,
+                    wall_path=wall_path,
+                    visuals=visuals,
+                    backdrop=b,
+                    before_alpha=current_alpha,
+                    after_alpha=ideal_alpha,
+                    applied_ipc=False,
+                    from_cache=from_cache,
+                    is_preload=is_preload,
+                    is_video=is_video,
+                    video_score=v_score,
+                    video_signals=v_signals,
+                    before_img_bytes=before_img_bytes,
+                    after_img_bytes=before_img_bytes,
+                    class_profile_before=class_profile_before,
+                    class_profile_after=class_profile_after,
+                )
+            return
 
+        # If in dev mode on a cache hit where before_img_bytes wasn't captured yet, capture before.png now
+        if dev_active and before_img_bytes is None and not is_preload:
+            try:
+                before_img_bytes = capture_window(win)
+            except Exception:
+                before_img_bytes = None
 
-    set_hyprland_win_opacity(win.address, ideal_alpha, ideal_alpha)
-    record_applied_state(win.address, ideal_alpha, backdrop_sig, geom)
-    record_managed_window(win.address)
+        # Apply new opacity
+        tag = "[PRELOAD]" if is_preload else "[DECIDE]"
+        if is_video:
+            prefix = " (cache hit - VIDEO)" if from_cache else " (VIDEO DETECTED)"
+            print(f"{tag}{prefix} alpha: {ideal_alpha:.2f} (S={v_score:.2f}) for {win.address}")
+        else:
+            prefix = " (cache hit) " if from_cache else " "
+            print(
+                f"{tag}{prefix}alpha: {ideal_alpha:.2f} "
+                f"(text_dens={visuals.text_density:.2f}, bg_ratio={visuals.bg_ratio:.2f}, wall_edge={b.edge_energy:.3f}) "
+                f"for {win.address}"
+            )
+
+        set_hyprland_win_opacity(win.address, ideal_alpha, ideal_alpha)
+        record_applied_state(win.address, ideal_alpha, backdrop_sig, geom)
+        record_managed_window(win.address)
+
+        if dev_active and not is_preload:
+            after_img_bytes: bytes | None = None
+            try:
+                # Allow compositor to render the newly dispatched opacity before capturing after.png
+                time.sleep(0.08)
+                after_img_bytes = capture_window(win)
+            except Exception as e:
+                print(f"[WARN] Failed to capture after.png for {win.address}: {e}")
+
+            if class_profile_before is None and win.window_class:
+                class_profile_before = get_class_profile(win.window_class)
+            if class_profile_after is None and win.window_class:
+                class_profile_after = get_class_profile(win.window_class)
+
+            save_dev_decision_bundle(
+                win=win,
+                mon=mon,
+                cfg=cfg,
+                wall_path=wall_path,
+                visuals=visuals,
+                backdrop=b,
+                before_alpha=current_alpha,
+                after_alpha=ideal_alpha,
+                applied_ipc=True,
+                from_cache=from_cache,
+                is_preload=is_preload,
+                is_video=is_video,
+                video_score=v_score,
+                video_signals=v_signals,
+                before_img_bytes=before_img_bytes,
+                after_img_bytes=after_img_bytes,
+                class_profile_before=class_profile_before,
+                class_profile_after=class_profile_after,
+            )
 
 
 def cache_hit_worker() -> None:
@@ -265,32 +708,78 @@ def cache_hit_worker() -> None:
 def luminance_worker() -> None:
     while not STOP_EVENT.is_set():
         try:
-            win, img = LUMINANCE_QUEUE.get(timeout=1.0)
+            item = LUMINANCE_QUEUE.get(timeout=1.0)
         except Empty:
             continue
 
         try:
-            mon = get_hyprland_active_monitor()
+            progressive = False
+            if len(item) == 4:
+                win, img, captured_alpha, progressive = item
+            elif len(item) == 3:
+                win, img, captured_alpha = item
+            else:
+                win, img = item
+                captured_alpha = get_applied_alpha(win.address)
+
+            mon = None
+            try:
+                mons = get_hyprland_monitors()
+                mon = next((m for m in mons if m.id == win.monitor_id), None)
+            except Exception:
+                mon = None
+            if mon is None:
+                mon = get_hyprland_active_monitor()
             if mon is None:
                 continue
 
             cfg = get_current_config()
             wall_path = cfg.get_wallpaper(mon.name, mon.id)
             wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
-            b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad)
+            b = backdrop_behind(
+                wall_lum,
+                win,
+                mon.x,
+                mon.y,
+                grad=wall_grad,
+                monitor_scale=mon.scale,
+            )
 
-            current_alpha = get_applied_alpha(win.address)
             class_ref = get_class_profile(win.window_class)
 
-            # Optical unblending: reconstruct true window content
+            # Optical unblending using the exact alpha active when the screenshot was captured
             visuals = window_colors(
                 img,
-                current_alpha=current_alpha,
+                current_alpha=captured_alpha,
                 backdrop_median=b.median,
                 class_ref=class_ref,
             )
-            cache_put(win, visuals)
-            apply_window_decision(win, visuals, from_cache=False, backdrop=b)
+
+            # If starting a progressive re-evaluation session, only seed class profile if none exists yet;
+            # otherwise wait for progressive convergence to update the persistent class EMA.
+            use_progressive = bool(progressive and cfg.reeval_max_ticks > 0)
+            should_update_class_now = (not use_progressive) or (class_ref is None)
+            cache_put(win, visuals, captured_alpha=captured_alpha, update_class=should_update_class_now)
+            updated_class_ref = get_class_profile(win.window_class)
+            apply_window_decision(
+                win,
+                visuals,
+                from_cache=False,
+                backdrop=b,
+                monitor=mon,
+                before_img_bytes=img,
+                class_profile_before=class_ref,
+                class_profile_after=updated_class_ref,
+            )
+            if use_progressive:
+                is_video, _, _ = evaluate_video_score(win, visuals)
+                if not is_video:
+                    PROGRESSIVE.start_session(
+                        win,
+                        initial_visuals=visuals,
+                        initial_thumb=_quick_thumbnail_array(img),
+                        initial_alpha=get_applied_alpha(win.address),
+                    )
         except Exception as e:
             print(f"[WARN] Error in luminance_worker: {e}")
         finally:
@@ -298,7 +787,7 @@ def luminance_worker() -> None:
 
 
 def preload_all_windows() -> None:
-    """Preload and apply opacity to all mapped windows using cached class profiles."""
+    """Preload and apply opacity to all mapped windows using cached window/class profiles."""
     if STOP_EVENT.is_set():
         return
     try:
@@ -313,7 +802,8 @@ def preload_all_windows() -> None:
         for win in all_windows:
             if STOP_EVENT.is_set():
                 break
-            profile = get_class_profile(win.window_class)
+            cached = cache_get(win)
+            profile = cached.visuals if cached is not None else get_class_profile(win.window_class)
             if profile is None:
                 continue
 
@@ -322,9 +812,40 @@ def preload_all_windows() -> None:
             count_preloaded += 1
 
         if count_preloaded > 0:
-            print(f"[INFO] Preloaded profiles for {count_preloaded} window(s) across workspaces")
+            print(f"[INFO] Applied decisions to {count_preloaded} window(s) across workspaces")
     except Exception as e:
         print(f"[WARN] Error during window profile preloading: {e}")
+
+
+def config_watcher_worker() -> None:
+    """Watch config.yaml for live edits and re-evaluate all open windows when settings change."""
+    from hyprsmart.config import CONFIG_FILE, load_config
+
+    try:
+        last_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
+    except OSError:
+        last_mtime = None
+
+    while not STOP_EVENT.is_set():
+        time.sleep(0.5)
+        try:
+            if CONFIG_FILE.exists():
+                mtime = CONFIG_FILE.stat().st_mtime
+                if last_mtime is not None and mtime != last_mtime:
+                    last_mtime = mtime
+                    cfg = load_config()
+                    print(
+                        f"[INFO] Reloaded config.yaml "
+                        f"(target_contrast={cfg.target_contrast}, floor_opacity={cfg.floor_opacity}, "
+                        f"video_opacity={cfg.video_opacity}, reeval_max_ticks={cfg.reeval_max_ticks}, "
+                        f"reeval_stable_ticks={cfg.reeval_stable_ticks})"
+                    )
+                    preload_all_windows()
+                    force_schedule_capture()
+                elif last_mtime is None:
+                    last_mtime = mtime
+        except Exception as e:
+            print(f"[WARN] Error in config_watcher_worker: {e}")
 
 
 def load_hyprsmart_daemons() -> None:
@@ -332,15 +853,16 @@ def load_hyprsmart_daemons() -> None:
     Thread(target=capture_worker, daemon=True).start()
     Thread(target=cache_hit_worker, daemon=True).start()
     Thread(target=luminance_worker, daemon=True).start()
+    Thread(target=config_watcher_worker, daemon=True).start()
     print("[INFO] Started HyprSmart workers")
     # Preload profiles for all existing windows immediately
     Thread(target=preload_all_windows, daemon=True).start()
-    SCHEDULER.schedule("initial_startup", 0.5, schedule_capture, force=False)
-
+    SCHEDULER.schedule("initial_startup", 0.5, schedule_capture, force=False, progressive=True)
 
 
 def stop_hyprsmart_daemons() -> None:
     STOP_EVENT.set()
+    PROGRESSIVE.cancel(commit_partial=False)
     SCHEDULER.cancel_all()
     restore_all_managed_windows()
 

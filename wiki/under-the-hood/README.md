@@ -45,6 +45,8 @@ Chaque document explore en profondeur un pilier technique :
    *Ordonnanceur glissant (trailing debounce), cache hiérarchique avec repli dynamique par classe, anti-contamination de transparence et diffing d'opacité.*
 8. [**08. Dé-mélange Optique & Profils Génériques de Classe**](08_optical_unblending_and_class_profiles.md)
    *Inversion mathématique de l'alpha compositing, profils de classe EMA et régularisation adaptative sans clignotement.*
+9. [**09. Réévaluation Progressive & Profils Dynamiques Émergents**](09_progressive_reevaluation_and_dynamic_profiles.md)
+   *Boucle de surveillance annulable (11 ticks, arrêt anticipé à 8 ticks stables), court-circuit d'identité pixel, bascule de polarité et apprentissage de volatilité (`volatility`, `settle_time`).*
 
 ---
 

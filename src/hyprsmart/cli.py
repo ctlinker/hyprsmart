@@ -21,16 +21,42 @@ from hyprsmart.daemon import (
     cache_clear,
     force_schedule_capture,
     get_control_socket_path,
+    get_dev_captures_dir,
     get_pid_file_path,
     handle_event,
+    is_dev_mode,
     listen_hyprland_socket,
     load_hyprsmart_daemons,
+    preload_all_windows,
     restore_all_managed_windows,
+    save_dev_decision_bundle,
     send_control_command,
+    set_dev_mode,
     stop_hyprsmart_daemons,
 )
-from hyprsmart.opacity import clear_wallpaper_cache
-from hyprsmart.primitive import get_hyprland_monitors
+from hyprsmart.daemon.cache import (
+    cache_put,
+    get_applied_alpha,
+    get_class_profile,
+    record_applied_state,
+)
+from hyprsmart.opacity import (
+    backdrop_behind,
+    clear_wallpaper_cache,
+    decide_opacity,
+    evaluate_video_score,
+    get_cached_wallpaper_backdrop_data,
+    window_colors,
+)
+from hyprsmart.primitive import (
+    capture_window,
+    get_hyprland_active_monitor,
+    get_hyprland_active_window,
+    get_hyprland_monitors,
+    set_hyprland_win_opacity,
+)
+
+DEV_FLAG_NAME = "--yes-am-a-dev-on-this-project-and-i-fully-understand-what-this-flag-does"
 
 
 def get_log_file_path() -> Path:
@@ -59,13 +85,97 @@ def is_daemon_running() -> int | None:
         return None
 
 
-def run_daemon_loop() -> None:
+def run_oneshot_dev_capture() -> Path | None:
+    """Capture the active window right now, run a decision, and save before.png, after.png, and metadata.json."""
+    cfg = load_config()
+    win = get_hyprland_active_window()
+    if win is None:
+        print("[WARN] No active Hyprland window found to capture.")
+        return None
+
+    mon = None
+    try:
+        mons = get_hyprland_monitors()
+        mon = next((m for m in mons if m.id == win.monitor_id), None)
+    except Exception:
+        mon = None
+    if mon is None:
+        mon = get_hyprland_active_monitor()
+    if mon is None:
+        print("[WARN] No active Hyprland monitor found.")
+        return None
+
+    current_alpha = get_applied_alpha(win.address)
+    before_bytes = capture_window(win)
+    wall_path = cfg.get_wallpaper(mon.name, mon.id)
+    wall_lum, wall_grad = get_cached_wallpaper_backdrop_data(wall_path, mon.width, mon.height)
+    b = backdrop_behind(wall_lum, win, mon.x, mon.y, grad=wall_grad, monitor_scale=mon.scale)
+
+    class_ref_before = get_class_profile(win.window_class)
+    visuals = window_colors(
+        before_bytes,
+        current_alpha=current_alpha,
+        backdrop_median=b.median,
+        class_ref=class_ref_before,
+    )
+    cache_put(win, visuals, captured_alpha=current_alpha)
+    class_ref_after = get_class_profile(win.window_class)
+
+    is_video, v_score, v_signals = evaluate_video_score(win, visuals)
+    if is_video:
+        ideal_alpha = cfg.video_opacity
+    else:
+        ideal_alpha = decide_opacity(
+            visuals,
+            b,
+            target=cfg.target_contrast,
+            floor=cfg.floor_opacity,
+        )
+
+    set_hyprland_win_opacity(win.address, ideal_alpha, ideal_alpha)
+    record_applied_state(
+        win.address,
+        ideal_alpha,
+        (b.p15, b.p85, b.edge_energy),
+        (int(win.x), int(win.y), int(win.width), int(win.height)),
+    )
+    time.sleep(0.08)
+    after_bytes = capture_window(win)
+
+    return save_dev_decision_bundle(
+        win=win,
+        mon=mon,
+        cfg=cfg,
+        wall_path=wall_path,
+        visuals=visuals,
+        backdrop=b,
+        before_alpha=current_alpha,
+        after_alpha=ideal_alpha,
+        applied_ipc=True,
+        from_cache=False,
+        is_preload=False,
+        is_video=is_video,
+        video_score=v_score,
+        video_signals=v_signals,
+        before_img_bytes=before_bytes,
+        after_img_bytes=after_bytes,
+        class_profile_before=class_ref_before,
+        class_profile_after=class_ref_after,
+    )
+
+
+def run_daemon_loop(dev_trace: bool = False) -> None:
     """Run the HyprSmart daemon in the foreground."""
     try:
         sys.stdout.reconfigure(line_buffering=True)
         sys.stderr.reconfigure(line_buffering=True)
     except AttributeError:
         pass
+
+    set_dev_mode(dev_trace)
+    if dev_trace:
+        print(f"[INFO] Developer trace mode ENABLED ({DEV_FLAG_NAME})")
+        print(f"[INFO] Saving before.png, after.png, metadata.json to {get_dev_captures_dir()}")
 
     pid = os.getpid()
     pid_file = get_pid_file_path()
@@ -82,6 +192,8 @@ def run_daemon_loop() -> None:
             return {
                 "status": "ok",
                 "pid": pid,
+                "dev_trace": is_dev_mode(),
+                "dev_captures_dir": str(get_dev_captures_dir()),
                 "config": {
                     "monitors": cfg.monitors,
                     "default_wallpaper": cfg.default_wallpaper,
@@ -89,13 +201,31 @@ def run_daemon_loop() -> None:
                     "floor_opacity": cfg.floor_opacity,
                     "video_opacity": cfg.video_opacity,
                     "debounce_interval": cfg.debounce_interval,
+                    "reeval_max_ticks": cfg.reeval_max_ticks,
+                    "reeval_stable_ticks": cfg.reeval_stable_ticks,
+                    "reeval_interval": cfg.reeval_interval,
                 },
+            }
+        elif cmd == "set_dev_mode":
+            enabled = bool(req.get("enabled", True))
+            set_dev_mode(enabled)
+            state_str = "ENABLED" if enabled else "DISABLED"
+            print(f"[INFO] Developer trace mode {state_str} via control socket")
+            if enabled:
+                force_schedule_capture()
+            return {
+                "status": "ok",
+                "message": f"Developer trace mode {state_str} (dir: {get_dev_captures_dir()})",
+                "dev_captures_dir": str(get_dev_captures_dir()),
             }
         elif cmd == "reload":
             print("[INFO] Reload request received")
+            if "dev_trace" in req:
+                set_dev_mode(bool(req["dev_trace"]))
             load_config()
             clear_wallpaper_cache()
             cache_clear()
+            preload_all_windows()
             force_schedule_capture()
             return {"status": "ok", "message": "Configuration and caches reloaded"}
         elif cmd == "set_setting":
@@ -105,6 +235,7 @@ def run_daemon_loop() -> None:
                 return {"status": "error", "message": "Missing key or value parameter"}
             ok, msg, _ = update_setting(key, str(value))
             if ok:
+                preload_all_windows()
                 force_schedule_capture()
                 return {"status": "ok", "message": msg}
             return {"status": "error", "message": msg}
@@ -114,6 +245,7 @@ def run_daemon_loop() -> None:
             if mon and wall:
                 set_monitor_wallpaper(mon, wall)
                 clear_wallpaper_cache()
+                preload_all_windows()
                 force_schedule_capture()
                 return {"status": "ok", "message": f"Monitor {mon} wallpaper updated"}
             return {"status": "error", "message": "Missing monitor or wallpaper parameter"}
@@ -152,13 +284,21 @@ def run_daemon_loop() -> None:
 
 
 def cmd_start(args: argparse.Namespace) -> None:
+    dev_flag = bool(getattr(args, "dev_trace", False) or getattr(args, "root_dev_trace", False))
     running_pid = is_daemon_running()
     if running_pid:
-        print(f"[INFO] HyprSmart is already running (PID {running_pid}).")
+        if dev_flag:
+            try:
+                res = send_control_command({"cmd": "set_dev_mode", "enabled": True}, timeout=2.0)
+                print(f"[OK] {res.get('message', 'Enabled dev trace mode on running daemon.')}")
+            except Exception as e:
+                print(f"[WARN] Daemon is running (PID {running_pid}) but failed to enable dev mode: {e}")
+        else:
+            print(f"[INFO] HyprSmart is already running (PID {running_pid}).")
         return
 
     if args.foreground:
-        run_daemon_loop()
+        run_daemon_loop(dev_trace=dev_flag)
     else:
         log_path = get_log_file_path()
         log_file = open(log_path, "a", encoding="utf-8")
@@ -166,8 +306,12 @@ def cmd_start(args: argparse.Namespace) -> None:
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
 
+        cmd = [sys.executable, "-m", "hyprsmart", "start", "--foreground"]
+        if dev_flag:
+            cmd.append(DEV_FLAG_NAME)
+
         proc = subprocess.Popen(
-            [sys.executable, "-m", "hyprsmart", "start", "--foreground"],
+            cmd,
             stdout=log_file,
             stderr=log_file,
             env=env,
@@ -177,6 +321,8 @@ def cmd_start(args: argparse.Namespace) -> None:
         time.sleep(0.3)
         print(f"[OK] HyprSmart daemon started in background (PID {proc.pid}).")
         print(f"[INFO] Logs written to {log_path}")
+        if dev_flag:
+            print(f"[INFO] Dev trace bundles (before.png, after.png, metadata.json) -> {get_dev_captures_dir()}")
 
 
 def cmd_stop(args: argparse.Namespace) -> None:
@@ -206,9 +352,15 @@ def cmd_stop(args: argparse.Namespace) -> None:
 
 
 def cmd_reload(args: argparse.Namespace) -> None:
+    dev_flag = bool(getattr(args, "dev_trace", False) or getattr(args, "root_dev_trace", False))
     try:
-        res = send_control_command({"cmd": "reload"}, timeout=2.0)
+        payload: dict = {"cmd": "reload"}
+        if dev_flag:
+            payload["dev_trace"] = True
+        res = send_control_command(payload, timeout=2.0)
         print(f"[OK] {res.get('message', 'Reloaded successfully.')}")
+        if dev_flag:
+            print(f"[INFO] Dev trace bundles enabled -> {get_dev_captures_dir()}")
     except ConnectionRefusedError:
         print("[WARN] Daemon is not running. Reloaded local config only.")
         load_config()
@@ -248,6 +400,10 @@ def cmd_status(args: argparse.Namespace) -> None:
             res = send_control_command({"cmd": "status"}, timeout=1.5)
             socket_path = get_control_socket_path()
             print(f"Control Socket: {socket_path}")
+            if res.get("dev_trace"):
+                print(f"Dev Trace Mode: ENABLED ({res.get('dev_captures_dir')})")
+            else:
+                print("Dev Trace Mode: DISABLED")
         except Exception:
             print("Control Socket: unresponsive")
     else:
@@ -367,6 +523,12 @@ def build_parser() -> argparse.ArgumentParser:
         prog="hyprsmart",
         description="HyprSmart: Dynamic accessibility & transparency daemon for Hyprland",
     )
+    parser.add_argument(
+        DEV_FLAG_NAME,
+        dest="root_dev_trace",
+        action="store_true",
+        help="Developer diagnostic mode: save before.png, after.png, and metadata.json for opacity decisions",
+    )
     subparsers = parser.add_subparsers(dest="subcommand", help="Available subcommands")
 
     # start
@@ -376,12 +538,24 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run daemon in the foreground (do not detach)",
     )
+    p_start.add_argument(
+        DEV_FLAG_NAME,
+        dest="dev_trace",
+        action="store_true",
+        help="Save before.png, after.png, and metadata.json for every opacity decision",
+    )
 
     # stop
     subparsers.add_parser("stop", help="Stop the running HyprSmart daemon")
 
     # reload
-    subparsers.add_parser("reload", help="Reload configuration and wallpaper caches")
+    p_reload = subparsers.add_parser("reload", help="Reload configuration and wallpaper caches")
+    p_reload.add_argument(
+        DEV_FLAG_NAME,
+        dest="dev_trace",
+        action="store_true",
+        help="Enable developer decision tracing on reload",
+    )
 
     # status
     subparsers.add_parser("status", help="Show daemon status and monitor configuration")
@@ -455,6 +629,18 @@ def main() -> None:
         cmd_monitor(args)
     elif args.subcommand == "settings":
         cmd_settings(args)
+    elif getattr(args, "root_dev_trace", False):
+        # Invoked directly as `hyprsmart --yes-am-a-dev-on-this-project-and-i-fully-understand-what-this-flag-does`
+        running_pid = is_daemon_running()
+        if running_pid:
+            try:
+                res = send_control_command({"cmd": "set_dev_mode", "enabled": True}, timeout=2.0)
+                print(f"[OK] {res.get('message', 'Enabled dev trace mode on running daemon.')}")
+            except Exception as e:
+                print(f"[WARN] Could not toggle running daemon via control socket: {e}")
+        bundle = run_oneshot_dev_capture()
+        if bundle:
+            print(f"[OK] Saved immediate diagnostic snapshot to: {bundle}")
     else:
         # If no arguments provided, display status or help
         parser.print_help()

@@ -175,7 +175,7 @@ def evaluate_video_score(
     if visuals is not None:
         # Video frames typically lack large uniform solid backgrounds
         # and maintain lower text density than text documents / source code.
-        is_visual = visuals.bg_ratio < 0.40 and visuals.text_density < 0.20
+        is_visual = visuals.bg_ratio <= 0.30 and visuals.text_density < 0.14
         if is_visual:
             signals["visual_video"] = True
             score += 0.25
