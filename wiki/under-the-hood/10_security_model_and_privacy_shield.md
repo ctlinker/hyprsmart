@@ -117,15 +117,19 @@ Dans les environnements multi-utilisateurs Linux, un socket situé dans `/tmp` s
 ### La Solution :
 1. **Emplacement Isolé** : Le socket est placé dans `$XDG_RUNTIME_DIR/hyprsmart/` (droits `0o700` gérés par systemd/logind). En cas d'absence de la variable, un repli sécurisé `/tmp/hyprsmart-<uid>` avec permissions strictes `0o700` est créé.
 2. **Permissions du Socket** : Application immédiate de `0o600` lors du `bind()`.
-3. **Contrôle d'Identité Noyau (`SO_PEERCRED`)** :
+3. **Contrôle d'Identité Noyau (`SO_PEERCRED`) en Mode Hermétique (*Fail-Closed*)** :
    À chaque connexion entrante sur le socket, le noyau Linux fournit de manière infalsifiable les identifiants du client appelant :
    ```python
-   cred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+   SO_PEERCRED = getattr(socket, "SO_PEERCRED", 17)
+   cred = conn.getsockopt(socket.SOL_SOCKET, SO_PEERCRED, struct.calcsize("3i"))
    pid, peer_uid, gid = struct.unpack("3i", cred)
-   if peer_uid != os.getuid():
-       # Rejet immédiat de la requête
-       conn.close()
+   expected_uid = os.geteuid() if hasattr(os, "geteuid") else (os.getuid() if hasattr(os, "getuid") else -1)
+   return peer_uid == expected_uid
    ```
+   En cas d'échec de lecture ou d'incompatibilité, le serveur applique un comportement **hermétique** (*fail-closed*) : la connexion est immédiatement rejetée sans exécuter aucune commande.
+4. **Protection Anti-Squatting et Contrôle de Propriété des Fichiers IPC** :
+   - Le répertoire runtime (`get_runtime_dir`) vérifie que le dossier existant appartient bien à l'UID effectif de l'utilisateur courant (`st.st_uid == os.geteuid()`), levant une exception `PermissionError` en cas de répertoire pré-créé par un autre utilisateur.
+   - Avant de délier (`unlink`) un socket ou un fichier de contrôle préexistant, HyprSmart vérifie systématiquement que le fichier appartient à l'utilisateur courant afin d'interdire la suppression d'un socket tiers.
 
 ---
 
@@ -161,7 +165,11 @@ def _enqueue_capture(item: tuple) -> None:
    Dans [`set_hyprland_win_opacity`](../../src/hyprsmart/primitive/window.py), l'adresse est vérifiée par `^0x[0-9a-fA-F]{1,16}$`. Tout caractère spécial (`"`, `;`, `\n`) est rejeté avec une `ValueError` avant tout contact avec le dispatcher.
 2. **Validation des Fichiers de Fond d'Écran** :
    Dans [`backdrop.py`](../../src/hyprsmart/opacity/backdrop.py), `os.path.isfile(path)` garantit que le chemin ne correspond ni à un tube nommé (FIFO) ni à un nœud de périphérique (`/dev/zero`, `/dev/urandom`), prévenant tout blocage indéfini des threads de calcul.
-3. **Atomicité des Fichiers de Configuration** :
-   [`save_config`](../../src/hyprsmart/config.py) écrit d'abord dans `config.yaml.tmp` avec permissions `0o600`, puis effectue un remplacement atomique `os.replace` pour éviter toute corruption de configuration lors d'un arrêt imprévu.
-4. **Interdiction d'Exécution Root** :
+3. **Atomicité et Permissions des Fichiers de Configuration & PID** :
+   - [`save_config`](../../src/hyprsmart/config.py) écrit d'abord dans `config.yaml.tmp` avec permissions `0o600`, puis effectue un remplacement atomique `os.replace`.
+   - Le fichier PID (`hyprsmart.pid`) est écrit dans un fichier temporaire avec permissions `0o600` avant remplacement atomique, garantissant l'intégrité de l'état même en cas de crash lors du lancement.
+4. **Isolation des Fichiers d'État et Journaux (`0o700`)** :
+   Le dossier `$XDG_STATE_HOME/hyprsmart/` est automatiquement verrouillé avec des permissions `0o700` (`chmod 700`) pour interdire la lecture des journaux par d'autres comptes locaux.
+5. **Interdiction d'Exécution Root** :
    Le CLI [`main()`](../../src/hyprsmart/cli.py) vérifie `os.geteuid() == 0` et interrompt immédiatement l'exécution pour prévenir toute compromission de fichiers système.
+

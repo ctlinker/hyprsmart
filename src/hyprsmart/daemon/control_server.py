@@ -14,13 +14,17 @@ def get_runtime_dir() -> Path:
         base = Path(xdg_runtime) / "hyprsmart"
     else:
         # Secure user-isolated fallback when XDG_RUNTIME_DIR is absent
-        uid = os.getuid() if hasattr(os, "getuid") else 1000
+        uid = os.geteuid() if hasattr(os, "geteuid") else (os.getuid() if hasattr(os, "getuid") else 1000)
         base = Path(tempfile.gettempdir()) / f"hyprsmart-{uid}"
     base.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
-        base.chmod(0o700)
+        os.chmod(str(base), 0o700)
     except OSError:
         pass
+    st = base.stat()
+    expected_uid = os.geteuid() if hasattr(os, "geteuid") else (os.getuid() if hasattr(os, "getuid") else None)
+    if expected_uid is not None and st.st_uid != expected_uid:
+        raise PermissionError(f"Runtime directory {base} is not owned by current user (owner UID {st.st_uid} != current UID {expected_uid}).")
     return base
 
 def get_control_socket_path() -> Path:
@@ -40,9 +44,16 @@ class ControlServer:
     def start(self) -> None:
         if self.socket_path.exists():
             try:
+                st = self.socket_path.stat()
+                expected_uid = os.geteuid() if hasattr(os, "geteuid") else (os.getuid() if hasattr(os, "getuid") else None)
+                if expected_uid is not None and st.st_uid != expected_uid:
+                    raise PermissionError(f"Socket {self.socket_path} exists and is not owned by current user.")
                 self.socket_path.unlink()
-            except OSError:
+            except FileNotFoundError:
                 pass
+            except OSError as e:
+                if isinstance(e, PermissionError):
+                    raise
 
         self.server_thread = threading.Thread(target=self._run, daemon=True)
         self.server_thread.start()
@@ -51,20 +62,24 @@ class ControlServer:
         self.stop_event.set()
         if self.socket_path.exists():
             try:
-                self.socket_path.unlink()
+                st = self.socket_path.stat()
+                expected_uid = os.geteuid() if hasattr(os, "geteuid") else (os.getuid() if hasattr(os, "getuid") else None)
+                if expected_uid is None or st.st_uid == expected_uid:
+                    self.socket_path.unlink()
             except OSError:
                 pass
 
     def _is_peer_authorized(self, conn: socket.socket) -> bool:
-        """Verify connecting peer UID matches daemon owner UID via SO_PEERCRED."""
+        """Verify connecting peer UID matches daemon owner UID via SO_PEERCRED (fail-closed)."""
         try:
             SO_PEERCRED = getattr(socket, "SO_PEERCRED", 17)
             cred = conn.getsockopt(socket.SOL_SOCKET, SO_PEERCRED, struct.calcsize("3i"))
             _, peer_uid, _ = struct.unpack("3i", cred)
-            expected_uid = os.getuid() if hasattr(os, "getuid") else peer_uid
+            expected_uid = os.geteuid() if hasattr(os, "geteuid") else (os.getuid() if hasattr(os, "getuid") else -1)
             return peer_uid == expected_uid
         except (OSError, struct.error, AttributeError):
-            return True
+            # Fail-closed: reject connection if credentials cannot be verified
+            return False
 
     def _run(self) -> None:
         server_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -89,7 +104,10 @@ class ControlServer:
         server_sock.close()
         if self.socket_path.exists():
             try:
-                self.socket_path.unlink()
+                st = self.socket_path.stat()
+                expected_uid = os.geteuid() if hasattr(os, "geteuid") else (os.getuid() if hasattr(os, "getuid") else None)
+                if expected_uid is None or st.st_uid == expected_uid:
+                    self.socket_path.unlink()
             except OSError:
                 pass
 

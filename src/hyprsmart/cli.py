@@ -69,6 +69,10 @@ DEV_FLAG_NAME = "--yes-am-a-dev-on-this-project-and-i-fully-understand-what-this
 def get_log_file_path() -> Path:
     log_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "hyprsmart"
     log_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(str(log_dir), 0o700)
+    except OSError:
+        pass
     return log_dir / "hyprsmart.log"
 
 
@@ -186,7 +190,24 @@ def run_daemon_loop(dev_trace: bool = False) -> None:
 
     pid = os.getpid()
     pid_file = get_pid_file_path()
-    pid_file.write_text(str(pid))
+    tmp_pid = pid_file.with_suffix(f".tmp.{pid}")
+    try:
+        tmp_pid.write_text(str(pid), encoding="utf-8")
+        try:
+            tmp_pid.chmod(0o600)
+        except OSError:
+            pass
+        tmp_pid.replace(pid_file)
+        try:
+            pid_file.chmod(0o600)
+        except OSError:
+            pass
+    finally:
+        if tmp_pid.exists():
+            try:
+                tmp_pid.unlink()
+            except OSError:
+                pass
 
     stop_event = threading.Event()
 

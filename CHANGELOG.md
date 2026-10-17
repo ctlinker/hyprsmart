@@ -3,6 +3,25 @@
 Toutes les modifications notables apportées à ce projet sont consignées dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/) et ce projet adhère à [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.8.5] - 2026-10-17
+
+### Sécurité & Durcissement IPC (Fail-Closed & Intégrité Système)
+- **Authentification noyau `SO_PEERCRED` en mode hermétique (*Fail-Closed*) (`control_server.py`)** :
+  - Rejet systématique et fermeture de la connexion si les accréditations de processus (`SO_PEERCRED`) ne peuvent pas être lues cryptographiquement ou si l'UID de l'appelant ne correspond pas à l'UID effectif du propriétaire du démon (`os.geteuid()`).
+  - Élimination du mode permissif par défaut en cas d'erreur de communication.
+- **Protection anti-squatting et vérification d'identité des fichiers IPC (`control_server.py`)** :
+  - Contrôle strict de l'appartenance du répertoire d'exécution (`st.st_uid == os.geteuid()`) dès sa résolution, levant une exception `PermissionError` en cas de tentative de détournement par un tiers.
+  - Vérification de la propriété du fichier socket UNIX (`control.sock`) avant toute tentative de déliaison (`unlink`), interdisant à un utilisateur ou processus tiers de forcer l'écrasement ou l'altération du socket.
+- **Écriture atomique et permissions restreintes du fichier PID (`cli.py`)** :
+  - Écriture du PID du démon via un fichier temporaire intermédiaire (`.tmp.<pid>`), application des droits `0o600` (lecture/écriture propriétaire exclusif) et remplacement atomique.
+  - Prévention totale de corruption ou lecture concurrente lors du démarrage du démon.
+- **Isolation des journaux système (`cli.py`)** :
+  - Application stricte des permissions `0o700` sur le dossier `$XDG_STATE_HOME/hyprsmart/`, protégeant `hyprsmart.log` contre la lecture par d'autres utilisateurs du système.
+- **Extension de la suite de tests de sécurité (`test_security_hardening.py`)** :
+  - 4 nouveaux tests unitaires vérifiant le rejet des répertoires tiers, le rejet des sockets tiers, le comportement hermétique de `_is_peer_authorized` sur erreur et les permissions restreintes du dossier de logs (totalisant 64 tests réussis).
+
+---
+
 ## [0.8.4] - 2026-10-17
 
 ### Optimisations & Performances Système (Réduction CPU & Énergie)

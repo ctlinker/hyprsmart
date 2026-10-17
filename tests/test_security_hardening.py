@@ -117,7 +117,11 @@ class TestSecurityHardening(unittest.TestCase):
         from hyprsmart.config import update_setting
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_cfg_file = Path(tmp_dir) / "config.yaml"
-            with patch("hyprsmart.config.CONFIG_DIR", Path(tmp_dir)), patch("hyprsmart.config.CONFIG_FILE", tmp_cfg_file):
+            tmp_bl_file = Path(tmp_dir) / "blacklist.yaml"
+            with patch("hyprsmart.config.CONFIG_DIR", Path(tmp_dir)), \
+                 patch("hyprsmart.config.CONFIG_FILE", tmp_cfg_file), \
+                 patch("hyprsmart.config.BLACKLIST_FILE", tmp_bl_file), \
+                 patch.dict(os.environ, {"HYPRSMART_NO_ESCALATE": "1"}):
                 ok, msg, cfg = update_setting("sensitive_classes", "keepassxc, my_secret_app, BitWarden")
                 self.assertTrue(ok)
                 self.assertIn("keepassxc", cfg.sensitive_classes)
@@ -352,6 +356,49 @@ class TestSecurityHardening(unittest.TestCase):
                     mode = tmp_bl.stat().st_mode & 0o777
                     self.assertEqual(mode & 0o222, 0)
 
+    def test_control_server_runtime_dir_ownership(self):
+        """Ensure get_runtime_dir verifies owner UID and rejects foreign-owned directory."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            fake_dir = Path(tmp_dir) / "fake_runtime"
+            fake_dir.mkdir(parents=True, exist_ok=True)
+            # Mock stat().st_uid as 9999 while current UID is 1000
+            fake_stat = os.stat_result((0o700, 0, 0, 0, 9999, 1000, 0, 0, 0, 0))
+            with patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(fake_dir)}):
+                with patch.object(Path, "stat", return_value=fake_stat):
+                    with patch("hyprsmart.daemon.control_server.os.geteuid", return_value=1000):
+                        with self.assertRaises(PermissionError):
+                            get_runtime_dir()
+
+    def test_control_server_stale_socket_ownership(self):
+        """Ensure start() refuses to unlink a socket owned by a different user."""
+        server = ControlServer(lambda req: {"status": "ok"})
+        # Mock socket existing with owner UID 9999
+        fake_stat = os.stat_result((0o600, 0, 0, 0, 9999, 1000, 0, 0, 0, 0))
+        with patch.object(Path, "exists", return_value=True):
+            with patch.object(Path, "stat", return_value=fake_stat):
+                with patch("hyprsmart.daemon.control_server.os.geteuid", return_value=1000):
+                    with self.assertRaises(PermissionError):
+                        server.start()
+
+    def test_control_server_peer_cred_fail_closed(self):
+        """Ensure _is_peer_authorized returns False (fail-closed) on SO_PEERCRED error."""
+        server = ControlServer(lambda req: {"status": "ok"})
+        mock_sock = MagicMock()
+        mock_sock.getsockopt.side_effect = OSError("SO_PEERCRED failed")
+
+        self.assertFalse(server._is_peer_authorized(mock_sock))
+
+    def test_log_dir_and_atomic_pid_permissions(self):
+        """Ensure log directory has 0700 mode and PID file is written with 0600 mode."""
+        from hyprsmart.cli import get_log_file_path, get_pid_file_path
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch.dict(os.environ, {"XDG_STATE_HOME": tmp_dir}):
+                log_file = get_log_file_path()
+                self.assertTrue(log_file.parent.exists())
+                mode = log_file.parent.stat().st_mode & 0o777
+                self.assertEqual(mode, 0o700)
+
 
 if __name__ == "__main__":
     unittest.main()
+
