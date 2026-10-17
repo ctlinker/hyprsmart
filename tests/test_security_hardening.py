@@ -169,6 +169,189 @@ class TestSecurityHardening(unittest.TestCase):
         self.assertEqual(lum.shape[0] > 0, True)
         self.assertAlmostEqual(float(lum[0, 0]), 0.2, places=1)
 
+    def test_blacklist_auto_create_readonly(self):
+        """Ensure load_blacklist automatically initializes blacklist.yaml with 0444 read-only permissions."""
+        from hyprsmart.config import get_blacklist_info, load_blacklist
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_bl = Path(tmp_dir) / "blacklist.yaml"
+            with patch("hyprsmart.config.CONFIG_DIR", Path(tmp_dir)), patch("hyprsmart.config.BLACKLIST_FILE", tmp_bl):
+                classes = load_blacklist()
+                self.assertTrue(tmp_bl.exists())
+                mode = tmp_bl.stat().st_mode & 0o777
+                # Must be 0o444 (no write permissions)
+                self.assertEqual(mode & 0o222, 0, f"Expected read-only 0444, got {oct(mode)}")
+                self.assertIn("keepassxc", classes)
+                self.assertIn("1password", classes)
+
+                info = get_blacklist_info()
+                self.assertTrue(info["exists"])
+                self.assertTrue(info["is_readonly"])
+
+    def test_blacklist_load_custom_and_fallback(self):
+        """Ensure load_blacklist parses custom classes and normalizes, with fallback on error."""
+        from hyprsmart.config import load_blacklist
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_bl = Path(tmp_dir) / "blacklist.yaml"
+            tmp_bl.write_text("sensitive_classes:\n  - MySecretVault\n  - '  KeePassXC  '\n", encoding="utf-8")
+            with patch("hyprsmart.config.CONFIG_DIR", Path(tmp_dir)), patch("hyprsmart.config.BLACKLIST_FILE", tmp_bl):
+                classes = load_blacklist()
+                self.assertEqual(classes, ["keepassxc", "mysecretvault"])
+
+                # Corrupt file test
+                tmp_bl.chmod(0o600)
+                tmp_bl.write_text(":::invalid:yaml:content", encoding="utf-8")
+                fallback_classes = load_blacklist()
+                self.assertIn("keepassxc", fallback_classes)
+
+    def test_blacklist_save_direct_readonly(self):
+        """Ensure save_blacklist with force_direct writes file and enforces 0444 mode."""
+        from hyprsmart.config import load_blacklist, save_blacklist
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_bl = Path(tmp_dir) / "blacklist.yaml"
+            with patch("hyprsmart.config.CONFIG_DIR", Path(tmp_dir)), patch("hyprsmart.config.BLACKLIST_FILE", tmp_bl):
+                ok, msg = save_blacklist(["custom_app", "another_app"], target_path=tmp_bl, force_direct=True)
+                self.assertTrue(ok)
+                mode = tmp_bl.stat().st_mode & 0o777
+                self.assertEqual(mode & 0o222, 0, f"Expected read-only permissions, got {oct(mode)}")
+                loaded = load_blacklist()
+                self.assertEqual(loaded, ["another_app", "custom_app"])
+
+    def test_blacklist_save_escalation_install_command(self):
+        """Ensure save_blacklist invokes privilege escalation via install -m 0444 -D."""
+        import subprocess
+        from hyprsmart.config import save_blacklist
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_bl = Path(tmp_dir) / "blacklist.yaml"
+            with patch("hyprsmart.config.CONFIG_DIR", Path(tmp_dir)), \
+                 patch("hyprsmart.config.BLACKLIST_FILE", tmp_bl), \
+                 patch("hyprsmart.config.find_escalation_tool", return_value="/usr/bin/pkexec"), \
+                 patch("subprocess.run") as mock_run:
+                ok, msg = save_blacklist(["shielded_app"], target_path=tmp_bl, force_direct=False)
+                self.assertTrue(ok)
+                mock_run.assert_called_once()
+                call_args = mock_run.call_args[0][0]
+                self.assertEqual(call_args[0], "/usr/bin/pkexec")
+                self.assertEqual(call_args[1], "install")
+                self.assertEqual(call_args[2], "-m")
+                self.assertEqual(call_args[3], "0444")
+                self.assertEqual(call_args[4], "-D")
+                self.assertEqual(call_args[6], str(tmp_bl.resolve()))
+                # Verify temp file was cleaned up
+                tmp_src = Path(call_args[5])
+                self.assertFalse(tmp_src.exists(), "Temporary file should be removed after install")
+
+    def test_blacklist_save_escalation_fallback_to_sudo(self):
+        """Ensure pkexec failure triggers fallback to sudo when available."""
+        import subprocess
+        from hyprsmart.config import save_blacklist
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_bl = Path(tmp_dir) / "blacklist.yaml"
+            with patch("hyprsmart.config.CONFIG_DIR", Path(tmp_dir)), \
+                 patch("hyprsmart.config.BLACKLIST_FILE", tmp_bl), \
+                 patch("hyprsmart.config.find_escalation_tool", return_value="/usr/bin/pkexec"), \
+                 patch("shutil.which", return_value="/usr/bin/sudo"):
+                # First run (pkexec) raises CalledProcessError, second (sudo) succeeds
+                mock_run = MagicMock(side_effect=[
+                    subprocess.CalledProcessError(126, ["pkexec", "install"]),
+                    MagicMock(returncode=0),
+                ])
+                with patch("subprocess.run", mock_run):
+                    ok, msg = save_blacklist(["shielded_app"], target_path=tmp_bl, force_direct=False)
+                    self.assertTrue(ok)
+                    self.assertEqual(mock_run.call_count, 2)
+                    self.assertEqual(mock_run.call_args_list[1][0][0][0], "/usr/bin/sudo")
+
+    def test_blacklist_save_escalation_failure_handled(self):
+        """Ensure escalation failure returns (False, error_msg) gracefully."""
+        import subprocess
+        from hyprsmart.config import save_blacklist
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_bl = Path(tmp_dir) / "blacklist.yaml"
+            with patch("hyprsmart.config.CONFIG_DIR", Path(tmp_dir)), \
+                 patch("hyprsmart.config.BLACKLIST_FILE", tmp_bl), \
+                 patch("hyprsmart.config.find_escalation_tool", return_value="/usr/bin/pkexec"), \
+                 patch("shutil.which", return_value=None), \
+                 patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, ["pkexec"])):
+                ok, msg = save_blacklist(["shielded_app"], target_path=tmp_bl, force_direct=False)
+                self.assertFalse(ok)
+                self.assertIn("failed", msg.lower())
+
+    def test_blacklist_mtime_triggers_config_reload(self):
+        """Ensure get_current_config reloads when blacklist.yaml mtime changes."""
+        from hyprsmart.config import get_current_config, load_config
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_cfg = Path(tmp_dir) / "config.yaml"
+            tmp_bl = Path(tmp_dir) / "blacklist.yaml"
+            tmp_bl.write_text("sensitive_classes:\n  - initial_app\n", encoding="utf-8")
+            with patch("hyprsmart.config.CONFIG_DIR", Path(tmp_dir)), \
+                 patch("hyprsmart.config.CONFIG_FILE", tmp_cfg), \
+                 patch("hyprsmart.config.BLACKLIST_FILE", tmp_bl):
+                cfg1 = load_config()
+                self.assertEqual(cfg1.sensitive_classes, ["initial_app"])
+
+                # Update blacklist file and mtime
+                new_mtime = tmp_bl.stat().st_mtime + 2.0
+                tmp_bl.write_text("sensitive_classes:\n  - initial_app\n  - updated_app\n", encoding="utf-8")
+                os.utime(tmp_bl, (new_mtime, new_mtime))
+
+                cfg2 = get_current_config()
+                self.assertIn("updated_app", cfg2.sensitive_classes)
+
+    def test_config_yaml_does_not_contain_sensitive_classes(self):
+        """Ensure save_config writes config.yaml without sensitive_classes."""
+        import yaml
+        from hyprsmart.config import HyprsmartConfig, save_config
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_cfg = Path(tmp_dir) / "config.yaml"
+            with patch("hyprsmart.config.CONFIG_DIR", Path(tmp_dir)), patch("hyprsmart.config.CONFIG_FILE", tmp_cfg):
+                cfg = HyprsmartConfig(target_contrast=7.5, sensitive_classes=["keepassxc", "vault"])
+                save_config(cfg)
+
+                raw_data = yaml.safe_load(tmp_cfg.read_text(encoding="utf-8"))
+                self.assertNotIn("sensitive_classes", raw_data, "config.yaml must not store sensitive_classes")
+                self.assertEqual(raw_data["target_contrast"], 7.5)
+
+    def test_cli_cmd_blacklist_actions(self):
+        """Ensure CLI cmd_blacklist correctly handles list, add, remove, and lock."""
+        import argparse
+        from hyprsmart.cli import cmd_blacklist
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_bl = Path(tmp_dir) / "blacklist.yaml"
+            tmp_bl.write_text("sensitive_classes:\n  - keepassxc\n  - bitwarden\n", encoding="utf-8")
+            with patch("hyprsmart.config.CONFIG_DIR", Path(tmp_dir)), \
+                 patch("hyprsmart.config.BLACKLIST_FILE", tmp_bl), \
+                 patch("hyprsmart.cli.send_control_command", return_value={"status": "ok"}):
+
+                # 1. List
+                args_list = argparse.Namespace(blacklist_action="list")
+                cmd_blacklist(args_list)
+
+                # 2. Add invalid class name (should reject)
+                args_add_invalid = argparse.Namespace(blacklist_action="add", classes=["invalid class!"])
+                cmd_blacklist(args_add_invalid)
+                self.assertNotIn("invalid class!", tmp_bl.read_text(encoding="utf-8"))
+
+                # 3. Add valid class name
+                with patch("hyprsmart.config.find_escalation_tool", return_value=None):
+                    args_add = argparse.Namespace(blacklist_action="add", classes=["my_vault", "1password"])
+                    cmd_blacklist(args_add)
+                    content = tmp_bl.read_text(encoding="utf-8")
+                    self.assertIn("my_vault", content)
+                    self.assertIn("1password", content)
+
+                    # 4. Remove class
+                    args_remove = argparse.Namespace(blacklist_action="remove", classes=["bitwarden"])
+                    cmd_blacklist(args_remove)
+                    content_after = tmp_bl.read_text(encoding="utf-8")
+                    self.assertNotIn("bitwarden", content_after)
+                    self.assertIn("keepassxc", content_after)
+
+                    # 5. Lock
+                    args_lock = argparse.Namespace(blacklist_action="lock", system=False)
+                    cmd_blacklist(args_lock)
+                    mode = tmp_bl.stat().st_mode & 0o777
+                    self.assertEqual(mode & 0o222, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

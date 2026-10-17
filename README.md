@@ -117,6 +117,24 @@ hyprsmart settings reeval_max_ticks 11
 hyprsmart settings reeval_stable_ticks 8
 ```
 
+### Privacy Shield & Blacklist Manager (`blacklist.yaml`)
+Sensitive applications (password managers, 2FA prompt dialogs, private browser windows) are shielded from screen capture and forced to full opacity (`1.0`). To prevent local unprivileged malware from tampering with the blacklist, sensitive classes reside in a dedicated, read-only file (`~/.config/hyprsmart/blacklist.yaml` or `/etc/hyprsmart/blacklist.yaml`, mode `0444`) managed through privilege escalation (`pkexec` / `sudo`):
+
+```bash
+# View active blacklist, file path, read-only permissions, and escalation tool
+hyprsmart blacklist
+
+# Add sensitive window classes (triggers Polkit/sudo authorization prompt)
+hyprsmart blacklist add keepassxc 1password bitwarden
+
+# Remove window classes
+hyprsmart blacklist remove bitwarden
+
+# Enforce read-only lock (0444) or promote to system-wide root-owned file
+hyprsmart blacklist lock
+hyprsmart blacklist lock --system
+```
+
 ### Developer Diagnostic Snapshot Mode
 Capture immediate decision artifacts for debugging without modifying ongoing workflows:
 

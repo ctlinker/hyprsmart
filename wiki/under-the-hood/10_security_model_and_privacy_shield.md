@@ -59,25 +59,50 @@ flowchart TD
 
 ---
 
-## 2. Bouclier de Confidentialité (*Privacy Shield*)
+## 2. Bouclier de Confidentialité (*Privacy Shield*) & `blacklist.yaml`
 
-### Le Risque : Capture Indiscriminée des Écrans
+### Le Risque : Capture Indiscriminée des Écrans & Altération Non Privilégiée
 Par défaut, un démon de gestion adaptative d'opacité capture l'image de la fenêtre active pour en quantifier la couleur et la densité textuelle. Si l'utilisateur consulte un coffre de mots de passe, une fenêtre bancaire ou une invite d'authentification PAM/Polkit, ces données sensibles transitent en mémoire sous forme de tableau de pixels et pourraient, en mode diagnostic, se retrouver écrites sur disque.
 
-### La Solution : Détection Préventive et Exclusion Absolue
-La fonction [`is_sensitive_window`](../../src/hyprsmart/config.py) analyse la classe (`window_class`) et le titre (`title`) de la fenêtre avant toute exécution de `grim` :
-- **Classes protégées par défaut** :
-  ```python
-  DEFAULT_SENSITIVE_CLASSES = [
-      "keepassxc", "org.keepassxc.keepassxc", "1password", "bitwarden",
-      "gcr-prompter", "polkit-gnome-authentication-agent-1",
-      "pinentry", "pinentry-qt", "pinentry-gtk-2"
-  ]
-  ```
-- **Mots-clés de titre protégés** : `private browsing`, `incognito`, `authentication required`, `unlock keyring`, `pinentry`, `enter password`.
+De plus, si la liste des applications sensibles résidait dans le fichier utilisateur standard et modifiable `~/.config/hyprsmart/config.yaml`, n'importe quel script malveillant ou processus non privilégié exécuté dans la session utilisateur pourrait silencieusement retirer ces applications de la liste pour déverrouiller la capture d'écran.
+
+### La Solution : Externalisation dans `blacklist.yaml` en Lecture Seule & Escalade de Privilèges
+Pour parer à cette menace, la configuration du bouclier de confidentialité est isolée dans un fichier dédié protégé en écriture :
+- **Fichier Système** : `/etc/hyprsmart/blacklist.yaml` (priorité maximale si présent, possédé par `root:root`).
+- **Fichier Utilisateur** : `~/.config/hyprsmart/blacklist.yaml` (créé en lecture seule avec permissions `0o444`, soit `chmod -w`).
+
+```yaml
+# ~/.config/hyprsmart/blacklist.yaml (chmod 0444)
+sensitive_classes:
+  - 1password
+  - bitwarden
+  - gcr-prompter
+  - keepassxc
+  - org.keepassxc.keepassxc
+  - pinentry
+  - pinentry-gtk-2
+  - pinentry-qt
+  - polkit-gnome-authentication-agent-1
+```
+
+- **Mots-clés de titre protégés par défaut** : `private browsing`, `incognito`, `authentication required`, `unlock keyring`, `pinentry`, `enter password`.
+
+### Mécanisme d'Édition Sécurisée par Escalade de Privilèges (`pkexec` / `sudo` / `doas`) :
+Toute modification de la liste noire requiert une confirmation explicite de l'utilisateur avec élévation de privilèges via [`save_blacklist`](../../src/hyprsmart/config.py) :
+1. Le fichier temporaire contenant les nouvelles classes est rédigé de manière sécurisée (`0o600`).
+2. L'outil d'escalade présent sur le système est détecté (`pkexec` Polkit en priorité pour afficher l'invite graphique, ou `sudo` / `doas`).
+3. L'utilitaire standard `/usr/bin/install -m 0444 -D <src> <dest>` est exécuté sous privilèges élevés, garantissant en une seule étape atomique la création de répertoires, la copie, la propriété root/système et les droits `0o444`.
+4. Le fichier temporaire est immédiatement purgé du disque.
+5. Le démon en cours d'exécution est automatiquement notifié via l'IPC pour recharger sa configuration sans redémarrage.
+
+### Commandes CLI Dédiées :
+- `hyprsmart blacklist` ou `hyprsmart blacklist list` : Affiche l'état de la liste noire (chemin, statut lecture seule, propriétaire, outil d'escalade détecté et classes protégées).
+- `hyprsmart blacklist add <class_name> [...]` : Ajoute une ou plusieurs classes et déclenche l'escalade de privilèges Polkit/sudo.
+- `hyprsmart blacklist remove <class_name> [...]` : Retire une classe de la liste avec validation privilégiée.
+- `hyprsmart blacklist lock [--system]` : Réapplique strictement les permissions `0o444` (et promeut en `/etc/hyprsmart/blacklist.yaml` avec `--system`).
 
 ### Comportement du Bouclier :
-1. **Zéro Capture** : L'appel à `grim` n'est jamais déclenché.
+1. **Zéro Capture** : L'appel à `grim` n'est jamais déclenché pour une fenêtre sensible.
 2. **Opacité Forcée à 1.0** : La fenêtre reste opaque (`1.0`) pour éviter tout regard indiscret à travers la vitre.
 3. **Zéro Persistance** : Le mode diagnostic [`dev_trace`](../../src/hyprsmart/daemon/dev_trace.py) refuse formellement de générer des bundles (`before.png`, `after.png`, `metadata.json`) pour les fenêtres sensibles.
 4. **Annulation Progressive** : Toute session de réévaluation progressive en cours est immédiatement révoquée.
