@@ -44,6 +44,8 @@ Explorez la mécanique interne et les démonstrations physiques qui éliminent l
    *Inversion mathématique du blending alpha ($L_{\text{pure}}$), persistance `profiles.json` et préchargement universel.*
 9. [**09. Réévaluation Progressive & Profils Dynamiques Émergents**](under-the-hood/09_progressive_reevaluation_and_dynamic_profiles.md)  
    *Surveillance cadencée annulable (11 ticks, arrêt à 8 stables), court-circuit pixel $32 \times 32$, bascule de polarité et filtre anti-wobble / anti-hunting.*
+10. [**10. Modèle de Sécurité, Durcissement IPC & Bouclier de Confidentialité**](under-the-hood/10_security_model_and_privacy_shield.md)  
+   *Authentification SO_PEERCRED, permissions de socket 0o600, protection contre les captures de fenêtres sensibles, bornage anti-DoS des files d'attente et validation des adresses.*
 
 Consultez également les [**Archives**](under-the-hood/archives/README.md) pour découvrir les technologies explorées puis retirées (ex: le prototype initial Vision-LLM).
 

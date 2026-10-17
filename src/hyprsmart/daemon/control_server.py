@@ -3,18 +3,31 @@ import json
 import os
 from pathlib import Path
 import socket
+import struct
+import tempfile
 import threading
 import time
 
+def get_runtime_dir() -> Path:
+    xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg_runtime:
+        base = Path(xdg_runtime) / "hyprsmart"
+    else:
+        # Secure user-isolated fallback when XDG_RUNTIME_DIR is absent
+        uid = os.getuid() if hasattr(os, "getuid") else 1000
+        base = Path(tempfile.gettempdir()) / f"hyprsmart-{uid}"
+    base.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        base.chmod(0o700)
+    except OSError:
+        pass
+    return base
+
 def get_control_socket_path() -> Path:
-    base = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "hyprsmart"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "control.sock"
+    return get_runtime_dir() / "control.sock"
 
 def get_pid_file_path() -> Path:
-    base = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "hyprsmart"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "hyprsmart.pid"
+    return get_runtime_dir() / "hyprsmart.pid"
 
 
 class ControlServer:
@@ -42,9 +55,24 @@ class ControlServer:
             except OSError:
                 pass
 
+    def _is_peer_authorized(self, conn: socket.socket) -> bool:
+        """Verify connecting peer UID matches daemon owner UID via SO_PEERCRED."""
+        try:
+            SO_PEERCRED = getattr(socket, "SO_PEERCRED", 17)
+            cred = conn.getsockopt(socket.SOL_SOCKET, SO_PEERCRED, struct.calcsize("3i"))
+            _, peer_uid, _ = struct.unpack("3i", cred)
+            expected_uid = os.getuid() if hasattr(os, "getuid") else peer_uid
+            return peer_uid == expected_uid
+        except (OSError, struct.error, AttributeError):
+            return True
+
     def _run(self) -> None:
         server_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server_sock.bind(str(self.socket_path))
+        try:
+            os.chmod(str(self.socket_path), 0o600)
+        except OSError:
+            pass
         server_sock.listen(5)
         server_sock.settimeout(1.0)
 
@@ -68,6 +96,14 @@ class ControlServer:
     def _handle_client(self, conn: socket.socket) -> None:
         with conn:
             conn.settimeout(2.0)
+            if not self._is_peer_authorized(conn):
+                try:
+                    payload = json.dumps({"status": "error", "error": "Unauthorized peer UID"}).encode("utf-8") + b"\n"
+                    conn.sendall(payload)
+                except Exception:
+                    pass
+                return
+
             data = b""
             while not self.stop_event.is_set():
                 try:

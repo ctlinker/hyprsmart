@@ -6,7 +6,9 @@ Ce dossier rassemble les comptes-rendus systématiques des interventions de dév
 
 ## 1. Sommaire Thématique par Jalon
 
-### Jalon v0.8.x — Réévaluation Progressive, Anti-Wobble & Diagnostic Développeur
+### Jalon v0.8.x — Réévaluation Progressive, Anti-Wobble & Durcissement Sécurité
+- [**2026-10-17 — Durcissement sécurité, surface d'attaque & bouclier de confidentialité (`v0.8.2`)**](2026-10-17_durcissement_securite_et_bouclier_confidentialite.md)  
+  *Bouclier de confidentialité pour fenêtres sensibles, authentification SO_PEERCRED, bornage des files à 8 éléments, validation regex des adresses et droits stricts 0o700/0o600.*
 - [**2026-10-16 — Fusion vers `dev` de la réévaluation progressive (`v0.8.1`)**](2026-10-16_fusion_dev_reevaluation_progressive.md)  
   *Intégration de `feat/progressive-change` dans `dev`, résolution des divergences et validation intégrale des 38 tests.*
 - [**2026-10-16 — Stabilisation anti-wobble & anti-hunting (`v0.8.1`)**](2026-10-16_stabilisation_anti_wobble_reevaluation_progressive.md)  

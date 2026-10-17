@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -9,10 +10,16 @@ import threading
 import time
 
 from hyprsmart.config import (
+    BLACKLIST_FILE,
     CONFIG_FILE,
     SETTINGS_METADATA,
+    SYSTEM_BLACKLIST_FILE,
+    get_blacklist_info,
+    get_blacklist_path,
     get_current_config,
+    load_blacklist,
     load_config,
+    save_blacklist,
     set_monitor_wallpaper,
     update_setting,
 )
@@ -518,6 +525,114 @@ def cmd_settings(args: argparse.Namespace) -> None:
         print(f"[WARN] Failed to notify daemon: {e}")
 
 
+def _notify_daemon_reload() -> None:
+    try:
+        res = send_control_command({"cmd": "reload"}, timeout=2.0)
+        if res.get("status") == "ok":
+            print("[OK] Notified running daemon: privacy shield configuration reloaded.")
+    except ConnectionRefusedError:
+        pass
+    except Exception as e:
+        print(f"[WARN] Failed to notify daemon: {e}")
+
+
+def cmd_blacklist(args: argparse.Namespace) -> None:
+    action = getattr(args, "blacklist_action", None)
+    if action in (None, "list"):
+        info = get_blacklist_info()
+        print("=== HyprSmart Privacy Shield Blacklist ===")
+        print(f"Path: {info['path']}")
+        print(f"Status: {'Active' if info['exists'] else 'Default (in-memory)'}")
+        perm_desc = "read-only" if info["is_readonly"] else "writable"
+        print(f"Permissions: {info['mode']} ({perm_desc})")
+        print(f"Owner: {info['owner']}")
+        tool_str = info['escalation_tool'] or "None detected (pkexec/sudo)"
+        print(f"Privilege Escalation Tool: {tool_str}")
+        print()
+        classes = sorted(info["classes"])
+        print(f"Shielded Window Classes ({len(classes)}):")
+        for c in classes:
+            print(f"  • {c}")
+        print()
+        print("Shielded Title Keywords (always active):")
+        for kw in info["keywords"]:
+            print(f"  • {kw}")
+        print()
+        print("To modify the blacklist, run:")
+        print("  hyprsmart blacklist add <class_name>")
+        print("  hyprsmart blacklist remove <class_name>")
+        print("  hyprsmart blacklist lock [--system]")
+        return
+
+    if action == "add":
+        classes_to_add = args.classes
+        CLASS_NAME_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
+        for c in classes_to_add:
+            if not CLASS_NAME_RE.match(c):
+                print(f"[ERROR] Invalid window class name '{c}'. Only alphanumeric, '_', '-', and '.' are allowed.")
+                return
+
+        current_classes = load_blacklist()
+        added = []
+        for c in classes_to_add:
+            c_clean = c.strip().lower()
+            if c_clean not in current_classes:
+                current_classes.append(c_clean)
+                added.append(c_clean)
+
+        if not added:
+            print("[INFO] All specified classes are already present in the blacklist.")
+            return
+
+        ok, msg = save_blacklist(current_classes)
+        if not ok:
+            print(f"[ERROR] Failed to update blacklist: {msg}")
+            sys.exit(1)
+
+        print(f"[OK] Added to blacklist: {', '.join(added)}")
+        _notify_daemon_reload()
+
+    elif action == "remove":
+        classes_to_remove = [c.strip().lower() for c in args.classes]
+        current_classes = load_blacklist()
+        removed = []
+        for c in classes_to_remove:
+            if c in current_classes:
+                current_classes.remove(c)
+                removed.append(c)
+
+        if not removed:
+            print("[INFO] None of the specified classes were found in the blacklist.")
+            return
+
+        ok, msg = save_blacklist(current_classes)
+        if not ok:
+            print(f"[ERROR] Failed to update blacklist: {msg}")
+            sys.exit(1)
+
+        print(f"[OK] Removed from blacklist: {', '.join(removed)}")
+        _notify_daemon_reload()
+
+    elif action == "lock":
+        if args.system:
+            target = SYSTEM_BLACKLIST_FILE
+            classes = load_blacklist()
+            ok, msg = save_blacklist(classes, target_path=target)
+            if not ok:
+                print(f"[ERROR] Failed to lock blacklist to {target}: {msg}")
+                sys.exit(1)
+            print(f"[OK] Blacklist promoted and locked at system path: {target} (read-only 0444).")
+        else:
+            path = get_blacklist_path()
+            classes = load_blacklist()
+            ok, msg = save_blacklist(classes, target_path=path)
+            if not ok:
+                print(f"[ERROR] Failed to lock blacklist at {path}: {msg}")
+                sys.exit(1)
+            print(f"[OK] Blacklist locked at: {path} (read-only 0444).")
+        _notify_daemon_reload()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="hyprsmart",
@@ -608,10 +723,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="New value for the setting",
     )
 
+    # blacklist
+    p_bl = subparsers.add_parser(
+        "blacklist",
+        help="Manage privacy-shielded window classes in read-only blacklist.yaml",
+    )
+    bl_sub = p_bl.add_subparsers(dest="blacklist_action", help="Blacklist actions")
+
+    # blacklist list
+    bl_sub.add_parser("list", help="List shielded window classes and security status")
+
+    # blacklist add
+    p_bl_add = bl_sub.add_parser("add", help="Add window class(es) to read-only blacklist")
+    p_bl_add.add_argument("classes", nargs="+", help="Window class name(s) to shield (e.g. keepassxc)")
+
+    # blacklist remove
+    p_bl_remove = bl_sub.add_parser("remove", help="Remove window class(es) from blacklist")
+    p_bl_remove.add_argument("classes", nargs="+", help="Window class name(s) to unshield")
+
+    # blacklist lock
+    p_bl_lock = bl_sub.add_parser("lock", help="Enforce 0444 read-only permissions on blacklist")
+    p_bl_lock.add_argument(
+        "--system",
+        action="store_true",
+        help="Promote and lock blacklist to /etc/hyprsmart/blacklist.yaml (root-protected)",
+    )
+
     return parser
 
 
 def main() -> None:
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        print("[ERROR] Running HyprSmart as root/superuser is strictly disallowed for security reasons.", file=sys.stderr)
+        sys.exit(1)
+
     parser = build_parser()
     args = parser.parse_args()
 
@@ -629,6 +774,8 @@ def main() -> None:
         cmd_monitor(args)
     elif args.subcommand == "settings":
         cmd_settings(args)
+    elif args.subcommand == "blacklist":
+        cmd_blacklist(args)
     elif getattr(args, "root_dev_trace", False):
         # Invoked directly as `hyprsmart --yes-am-a-dev-on-this-project-and-i-fully-understand-what-this-flag-does`
         running_pid = is_daemon_running()

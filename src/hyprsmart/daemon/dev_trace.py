@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 from threading import Lock
 import time
 from typing import Any
@@ -11,7 +12,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-from hyprsmart.config import HyprsmartConfig
+from hyprsmart.config import HyprsmartConfig, is_sensitive_window
 from hyprsmart.opacity.backdrop import Backdrop, _luminance, compute_sobel_energy
 from hyprsmart.opacity.compute import _ratio
 from hyprsmart.opacity.win_col import WindowVisuals
@@ -20,6 +21,7 @@ from hyprsmart.primitive import Monitor, Window, capture_window
 DEV_MODE_ENABLED: bool = False
 _DEV_LOCK = Lock()
 _SEQ_COUNTER: int = 0
+MAX_DEV_BUNDLES: int = 30
 
 
 def set_dev_mode(enabled: bool) -> None:
@@ -35,8 +37,27 @@ def is_dev_mode() -> bool:
 
 def get_dev_captures_dir() -> Path:
     base = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "hyprsmart" / "dev_captures"
-    base.mkdir(parents=True, exist_ok=True)
+    base.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        base.chmod(0o700)
+    except OSError:
+        pass
     return base
+
+
+def prune_old_dev_bundles(max_bundles: int = MAX_DEV_BUNDLES) -> None:
+    """Prune oldest bundle directories to prevent unbounded disk growth."""
+    try:
+        captures_dir = get_dev_captures_dir()
+        entries = sorted(
+            [p for p in captures_dir.iterdir() if p.is_dir()],
+            key=lambda p: p.stat().st_mtime,
+        )
+        if len(entries) > max_bundles:
+            for old_dir in entries[: len(entries) - max_bundles]:
+                shutil.rmtree(old_dir, ignore_errors=True)
+    except Exception:
+        pass
 
 
 def extract_raw_capture_diagnostics(img_bytes: bytes | None) -> dict[str, Any] | None:
@@ -223,6 +244,10 @@ def save_dev_decision_bundle(
     """
     Save before.png, after.png, and metadata.json for a single opacity decision.
     """
+    if is_sensitive_window(win, cfg):
+        # Never dump sensitive windows to disk
+        return None
+
     global _SEQ_COUNTER
     with _DEV_LOCK:
         _SEQ_COUNTER += 1
@@ -235,7 +260,11 @@ def save_dev_decision_bundle(
 
     bundle_dir = get_dev_captures_dir() / f"{ts_str}_{seq:04d}_{safe_cls}_{safe_addr}"
     try:
-        bundle_dir.mkdir(parents=True, exist_ok=True)
+        bundle_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            bundle_dir.chmod(0o700)
+        except OSError:
+            pass
 
         before_path = bundle_dir / "before.png"
         after_path = bundle_dir / "after.png"
@@ -244,12 +273,24 @@ def save_dev_decision_bundle(
         # If before_img_bytes wasn't provided (e.g. cache hit), try capturing or note missing
         if before_img_bytes:
             before_path.write_bytes(before_img_bytes)
+            try:
+                before_path.chmod(0o600)
+            except OSError:
+                pass
 
         if after_img_bytes:
             after_path.write_bytes(after_img_bytes)
+            try:
+                after_path.chmod(0o600)
+            except OSError:
+                pass
         elif before_img_bytes and not applied_ipc:
             # Opacity was unchanged (skipped IPC due to diff threshold), so after is identical to before
             after_path.write_bytes(before_img_bytes)
+            try:
+                after_path.chmod(0o600)
+            except OSError:
+                pass
 
         raw_diag = extract_raw_capture_diagnostics(before_img_bytes)
         solver_info = compute_solver_breakdown(
@@ -333,7 +374,12 @@ def save_dev_decision_bundle(
         }
 
         meta_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+        try:
+            meta_path.chmod(0o600)
+        except OSError:
+            pass
         print(f"[DEV-TRACE] Saved decision #{seq} (before.png, after.png, metadata.json) -> {bundle_dir}")
+        prune_old_dev_bundles()
         return bundle_dir
     except Exception as e:
         print(f"[WARN] Failed to save dev decision bundle: {e}")

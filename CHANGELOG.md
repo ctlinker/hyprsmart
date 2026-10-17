@@ -5,6 +5,55 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [0.8.3] - 2026-10-17
+
+### Sécurité & Durcissement
+- **Externalisation de la liste noire dans `blacklist.yaml` en lecture seule (`config.py`)** :
+  - Déplacement des classes d'applications sensibles (`sensitive_classes`) hors du fichier modifiable `config.yaml` vers un fichier dédié protégé en écriture (`0o444` / `chmod -w`).
+  - Support de la hiérarchie système `/etc/hyprsmart/blacklist.yaml` (propriété root, priorité maximale) et repli utilisateur `~/.config/hyprsmart/blacklist.yaml`.
+  - Protection contre les malwares et scripts non privilégiés exécutés dans la session utilisateur : aucune modification non autorisée n'est possible en espace utilisateur.
+- **Escalade de privilèges sécurisée (`pkexec` / `sudo` / `doas`)** :
+  - Toute modification de la liste noire requiert une confirmation interactive explicite avec élévation de privilèges via `pkexec` (Polkit graphique/terminal) ou repli sur `sudo`.
+  - Utilisation atomique de l'utilitaire système standard `/usr/bin/install -m 0444 -D` pour la copie, la sécurisation des droits `0o444` et la propriété système en un seul appel sans invite répétée.
+  - Purgement systématique des fichiers temporaires après écriture.
+- **Nouvelle commande CLI d'administration `hyprsmart blacklist` (`cli.py`)** :
+  - `hyprsmart blacklist [list]` : Consultation complète de l'état (emplacement, statut lecture seule, propriétaire, outil d'escalade et classes protégées).
+  - `hyprsmart blacklist add <classes...>` : Ajout de fenêtres sensibles avec validation alphanumérique (`^[a-zA-Z0-9_\-\.]+$`) et invite Polkit/sudo.
+  - `hyprsmart blacklist remove <classes...>` : Retrait de classes avec rechargement à chaud du démon.
+  - `hyprsmart blacklist lock [--system]` : Verrouillage strict des permissions `0o444` ou promotion système en `/etc/hyprsmart/blacklist.yaml`.
+- **Surveillance mtime multi-fichiers (`get_current_config`)** :
+  - Prise en compte immédiate des modifications de `blacklist.yaml` sans redémarrage du démon.
+- **Suite de tests de sécurité étendue (`test_security_hardening.py`)** :
+  - 9 nouveaux tests unitaires couvrant la création automatique en `0o444`, le repli sur erreur, l'écriture directe, la commande d'escalade Polkit/sudo, la tolérance aux pannes d'escalade, le rechargement par mtime, l'absence de `sensitive_classes` dans `config.yaml` et toutes les actions CLI (totalisant 55 tests réussis).
+
+---
+
+## [0.8.2] - 2026-10-17
+
+### Sécurité & Durcissement
+- **Bouclier de confidentialité pour fenêtres sensibles (`is_sensitive_window` dans `config.py`)** :
+  - Détection et exclusion automatique des gestionnaires de mots de passe (`keepassxc`, `1password`, `bitwarden`), des prompters d'authentification (`polkit`, `gcr-prompter`, `pinentry`) et des sessions de navigation privée (`incognito`, `private browsing`).
+  - L'appel de capture `grim` est intégralement court-circuité, l'opacité opaque (`1.0`) est appliquée d'office et aucune donnée n'est envoyée dans les traces développeur.
+- **Durcissement du Socket UNIX & Authentification `SO_PEERCRED` (`control_server.py`)** :
+  - Isolation du répertoire d'exécution utilisateur (`0o700`) sans risque d'attaque par lien symbolique dans `/tmp`.
+  - Application stricte des permissions `0o600` sur le fichier socket `control.sock`.
+  - Contrôle cryptographique/noyau de l'identité du client appelant via `SO_PEERCRED` pour s'assurer que seul l'utilisateur propriétaire du démon peut envoyer des ordres de contrôle.
+- **Bornage des files d'attente mémoire & politique anti-saturation (`handle.py`)** :
+  - Limitation stricte de `CAPTURE_QUEUE` et `LUMINANCE_QUEUE` à 8 éléments avec éviction de l'élément le plus ancien (*drop oldest*) lors de rafales massives d'événements, éliminant tout risque de crash par dépassement de mémoire (*Out-Of-Memory*).
+- **Validation stricte des adresses de fenêtre (`window.py`)** :
+  - Validation préalable par expression régulière hexadécimale (`^0x[0-9a-fA-F]{1,16}$`) interdisant toute injection de syntaxe dans la commande de dispatch Hyprland (`hl.dsp.window.set_prop`).
+- **Protection des traces développeur & quota de rétention (`dev_trace.py`)** :
+  - Droits d'accès `0o700` sur le dossier `dev_captures/` et `0o600` sur les fichiers `.png` et `.json`.
+  - Quota glissant automatique (`MAX_DEV_BUNDLES = 30`) pour prémunir le disque contre toute saturation.
+- **Écriture atomique et sécurisée de `config.yaml` (`config.py`)** :
+  - Écriture via fichier `.tmp` intermédiaire et renommage atomique avec droits `0o600`.
+- **Interdiction de l'exécution en tant que superutilisateur (`cli.py`)** :
+  - Blocage immédiat avec message d'erreur si `geteuid() == 0`.
+- **Suite de tests de sécurité dédiée (`test_security_hardening.py`)** :
+  - 7 nouveaux tests validant le bouclier de confidentialité, le rejet des adresses malformées, l'authentification `SO_PEERCRED`, le bornage des files et l'atomicité de la configuration (total 45 tests au vert).
+
+---
+
 ## [0.8.1] - 2026-10-16
 
 ### Corrigé
