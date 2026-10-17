@@ -222,10 +222,16 @@ SETTINGS_METADATA = {
         "max": None,
         "description": "Default wallpaper path when no monitor-specific wallpaper is set",
     },
+    "sensitive_classes": {
+        "type": list,
+        "min": None,
+        "max": None,
+        "description": "Comma-separated list of window classes shielded from screen capture (forced opaque)",
+    },
 }
 
 
-def update_setting(key: str, raw_value: str) -> tuple[bool, str, HyprsmartConfig]:
+def update_setting(key: str, raw_value: Any) -> tuple[bool, str, HyprsmartConfig]:
     """Validate and update a configuration setting, saving it to disk."""
     cfg = get_current_config()
     meta = SETTINGS_METADATA.get(key)
@@ -250,6 +256,16 @@ def update_setting(key: str, raw_value: str) -> tuple[bool, str, HyprsmartConfig
                 setattr(cfg, key, None)
             else:
                 setattr(cfg, key, val)
+        elif expected_type == list:
+            if isinstance(raw_value, list):
+                val = [str(c).strip().lower() for c in raw_value if str(c).strip()]
+            else:
+                raw_str = str(raw_value).strip()
+                if raw_str.lower() in ("none", "null", "empty", "[]", ""):
+                    val = []
+                else:
+                    val = [c.strip().lower() for c in raw_str.split(",") if c.strip()]
+            setattr(cfg, key, val)
     except ValueError:
         return False, f"Invalid value '{raw_value}' for setting '{key}'. Expected {expected_type.__name__}.", cfg
 

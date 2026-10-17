@@ -112,6 +112,23 @@ class TestSecurityHardening(unittest.TestCase):
                 mode = tmp_cfg_file.stat().st_mode & 0o777
                 self.assertEqual(mode & 0o077, 0, "Config file should have no group/other permissions")
 
+    def test_update_setting_sensitive_classes(self):
+        """Ensure sensitive_classes can be customized via update_setting."""
+        from hyprsmart.config import update_setting
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_cfg_file = Path(tmp_dir) / "config.yaml"
+            with patch("hyprsmart.config.CONFIG_DIR", Path(tmp_dir)), patch("hyprsmart.config.CONFIG_FILE", tmp_cfg_file):
+                ok, msg, cfg = update_setting("sensitive_classes", "keepassxc, my_secret_app, BitWarden")
+                self.assertTrue(ok)
+                self.assertIn("keepassxc", cfg.sensitive_classes)
+                self.assertIn("my_secret_app", cfg.sensitive_classes)
+                self.assertIn("bitwarden", cfg.sensitive_classes)
+
+                # Reset to empty
+                ok, msg, cfg = update_setting("sensitive_classes", "empty")
+                self.assertTrue(ok)
+                self.assertEqual(cfg.sensitive_classes, [])
+
     def test_bounded_queues_drop_oldest(self):
         """Ensure bounded queues do not grow unbounded and drop oldest entries under pressure."""
         # Drain queues first
