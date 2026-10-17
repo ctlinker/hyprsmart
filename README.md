@@ -36,6 +36,7 @@ Every adjustment guarantees text clarity according to **WCAG 2.x relative lumina
 - **Cancelable Progressive Re-evaluation**: Tracks slow-loading windows (browsers, SPAs, Electron apps) across up to `11` one-second ticks (stopping early after `8` consecutive stable seconds), adapting the probing budget per class as its dynamic profile emerges.
 - **Anti-Wobble & Anti-Hunting Stabilization**: Guarantees silky-smooth settling on dynamic pages (carousels, cursor blinking, CSS animations) through low-pass EMA temporal damping on micro-jumps ($\le 0.10$), $50\%$ attenuation of spatial texture noise, and sensitivity threshold annealing after $t > 3\text{s}$.
 - **Polarity-Flip Adaptation**: Detects major contrast shifts ($|\Delta L| > 0.25$, e.g. dark splash screen to white web page) and immediately bypasses class regularization for instant $100\%$ adaptation.
+- **Privacy Shield & IPC Hardening**: Built-in credential shield prevents screen capture of password managers (`keepassxc`, `bitwarden`, `1password`, `polkit`, incognito sessions) by automatically forcing them fully opaque without saving pixels. Control sockets enforce strict `0o600` permissions and kernel-level `SO_PEERCRED` caller UID authorization.
 - **Micro-Reactive Adjustments**: Focus switches, window dragging across light/dark wallpaper areas, and resizing seamlessly trigger microscopic opacity updates tailored in real-time to the user's eye.
 
 ---
@@ -162,6 +163,7 @@ Explore the complete technical specifications and session journals in our **[Wik
   - [07. Dynamic Caching & Trailing Debounce](wiki/under-the-hood/07_dynamic_caching_and_deferred_execution.md)
   - [08. Optical Unblending & Persistent Class Profiles](wiki/under-the-hood/08_optical_unblending_and_class_profiles.md)
   - [09. Progressive Re-evaluation, Dynamic Profiles & Anti-Wobble](wiki/under-the-hood/09_progressive_reevaluation_and_dynamic_profiles.md)
+  - [10. Security Model, IPC Hardening & Privacy Shield](wiki/under-the-hood/10_security_model_and_privacy_shield.md)
   - [Archives: Historical & Deprecated Architectures](wiki/under-the-hood/archives/README.md)
 - **[Session Reports](wiki/reports/README.md)**: Chronological index of all 20+ development reports and design decisions.
 

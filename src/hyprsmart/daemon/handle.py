@@ -1,14 +1,14 @@
 from dataclasses import dataclass
 import io
 import time
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 from threading import Thread, Timer, Event, Lock
 from typing import Any
 
 import numpy as np
 from PIL import Image
 
-from hyprsmart.config import get_current_config
+from hyprsmart.config import get_current_config, is_sensitive_window
 from hyprsmart.opacity import (
     Backdrop,
     backdrop_behind,
@@ -49,9 +49,43 @@ from .dev_trace import (
 )
 from .socket import HyprEvent
 
-CAPTURE_QUEUE = Queue()
-LUMINANCE_QUEUE = Queue()
-CACHE_HIT_QUEUE = Queue()
+# Bounded queues to prevent memory ballooning / OOM during rapid event floods
+CAPTURE_QUEUE = Queue(maxsize=8)
+LUMINANCE_QUEUE = Queue(maxsize=8)
+CACHE_HIT_QUEUE = Queue(maxsize=8)
+
+
+def _enqueue_capture(item: tuple) -> None:
+    """Enqueue capture request, dropping the oldest uncaptured request if queue is full."""
+    try:
+        CAPTURE_QUEUE.put_nowait(item)
+    except Full:
+        try:
+            _ = CAPTURE_QUEUE.get_nowait()
+            CAPTURE_QUEUE.task_done()
+        except Empty:
+            pass
+        try:
+            CAPTURE_QUEUE.put_nowait(item)
+        except Full:
+            pass
+
+
+def _enqueue_luminance(item: tuple) -> None:
+    """Enqueue luminance analysis task, dropping oldest item if queue is saturated."""
+    try:
+        LUMINANCE_QUEUE.put_nowait(item)
+    except Full:
+        try:
+            _ = LUMINANCE_QUEUE.get_nowait()
+            LUMINANCE_QUEUE.task_done()
+        except Empty:
+            pass
+        try:
+            LUMINANCE_QUEUE.put_nowait(item)
+        except Full:
+            pass
+
 
 MANAGED_WINDOWS: set[str] = set()
 MANAGED_LOCK = Lock()
@@ -279,6 +313,16 @@ class ProgressiveReevaluator:
         if win is None or win.address != session.address:
             # Focus moved away or window closed -> cancel and commit partial observation
             self.cancel(session.address, commit_partial=True)
+            return False
+
+        cfg = get_current_config()
+        if is_sensitive_window(win, cfg):
+            # Privacy shield: immediately force opaque, cancel progressive session without capture
+            try:
+                set_hyprland_win_opacity(win.address, 1.0, 1.0)
+            except Exception:
+                pass
+            self.cancel(session.address, commit_partial=False)
             return False
 
         session.current_tick += 1
@@ -528,6 +572,23 @@ def schedule_capture(
     if target_address is not None and win.address != target_address:
         # Ignore title change events emitted by unfocused background windows
         return
+
+    cfg = get_current_config()
+    if is_sensitive_window(win, cfg):
+        # Privacy shield: immediately set 1.0 (opaque), skip grim capture entirely
+        try:
+            set_hyprland_win_opacity(win.address, 1.0, 1.0)
+            record_applied_state(
+                win.address,
+                1.0,
+                (0.0, 0.0, 0.0),
+                (int(win.x), int(win.y), int(win.width), int(win.height)),
+            )
+        except Exception:
+            pass
+        PROGRESSIVE.cancel(win.address, commit_partial=False)
+        return
+
     if not force and (e := cache_get(win)):
         CACHE_HIT_QUEUE.put((win, e))
         if progressive:
@@ -540,7 +601,7 @@ def schedule_capture(
                     initial_alpha=get_applied_alpha(win.address),
                 )
         return
-    CAPTURE_QUEUE.put((win, progressive))
+    _enqueue_capture((win, progressive))
 
 
 def capture_worker() -> None:
@@ -555,11 +616,20 @@ def capture_worker() -> None:
         else:
             win, progressive = item, False
 
+        cfg = get_current_config()
+        if is_sensitive_window(win, cfg):
+            try:
+                set_hyprland_win_opacity(win.address, 1.0, 1.0)
+            except Exception:
+                pass
+            CAPTURE_QUEUE.task_done()
+            continue
+
         try:
             # Snapshot the window's applied alpha at the exact time of screenshot capture
             alpha_at_capture = get_applied_alpha(win.address)
             img = capture_window(win)
-            LUMINANCE_QUEUE.put((win, img, alpha_at_capture, progressive))
+            _enqueue_luminance((win, img, alpha_at_capture, progressive))
         except Exception as e:
             print(f"[WARN] Failed to capture window {win.address}: {e}")
         finally:
@@ -610,7 +680,9 @@ def apply_window_decision(
                 monitor_scale=mon.scale,
             )
 
-        if is_video:
+        if is_sensitive_window(win, cfg):
+            ideal_alpha = 1.0
+        elif is_video:
             ideal_alpha = cfg.video_opacity
         elif target_alpha is not None:
             ideal_alpha = float(target_alpha)
@@ -827,9 +899,24 @@ def preload_all_windows() -> None:
         mons = {m.id: m for m in get_hyprland_monitors()}
         count_preloaded = 0
 
+        cfg = get_current_config()
         for win in all_windows:
             if STOP_EVENT.is_set():
                 break
+            if is_sensitive_window(win, cfg):
+                try:
+                    set_hyprland_win_opacity(win.address, 1.0, 1.0)
+                    record_applied_state(
+                        win.address,
+                        1.0,
+                        (0.0, 0.0, 0.0),
+                        (int(win.x), int(win.y), int(win.width), int(win.height)),
+                    )
+                    count_preloaded += 1
+                except Exception:
+                    pass
+                continue
+
             cached = cache_get(win)
             profile = cached.visuals if cached is not None else get_class_profile(win.window_class)
             if profile is None:

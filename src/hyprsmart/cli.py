@@ -612,6 +612,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        print("[ERROR] Running HyprSmart as root/superuser is strictly disallowed for security reasons.", file=sys.stderr)
+        sys.exit(1)
+
     parser = build_parser()
     args = parser.parse_args()
 

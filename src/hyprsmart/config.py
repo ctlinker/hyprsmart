@@ -1,10 +1,23 @@
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 import os
+from typing import Any
 import yaml
 
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "hyprsmart"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
+
+DEFAULT_SENSITIVE_CLASSES: list[str] = [
+    "keepassxc",
+    "org.keepassxc.keepassxc",
+    "1password",
+    "bitwarden",
+    "gcr-prompter",
+    "polkit-gnome-authentication-agent-1",
+    "pinentry",
+    "pinentry-qt",
+    "pinentry-gtk-2",
+]
 
 @dataclass
 class HyprsmartConfig:
@@ -17,6 +30,7 @@ class HyprsmartConfig:
     reeval_max_ticks: int = 11
     reeval_stable_ticks: int = 8
     reeval_interval: float = 1.0
+    sensitive_classes: list[str] = field(default_factory=lambda: list(DEFAULT_SENSITIVE_CLASSES))
 
     def get_wallpaper(self, mon_name: str, mon_id: int | str | None = None) -> str | None:
         """Find wallpaper by monitor id or monitor name, then fallback to default."""
@@ -25,6 +39,45 @@ class HyprsmartConfig:
         if mon_name in self.monitors:
             return self.monitors[mon_name]
         return self.default_wallpaper
+
+
+def is_sensitive_window(win: Any, cfg: HyprsmartConfig | None = None) -> bool:
+    """
+    Check if a window is marked sensitive or private (password managers, auth prompts, incognito).
+    Sensitive windows must never be captured via grim, probed progressively, or traced.
+    """
+    if win is None:
+        return False
+
+    if cfg is None:
+        cfg = get_current_config()
+
+    w_cls = getattr(win, "window_class", "") or ""
+    w_title = getattr(win, "title", "") or ""
+
+    cls_lower = str(w_cls).strip().lower()
+    title_lower = str(w_title).strip().lower()
+
+    sensitive_set = {str(c).strip().lower() for c in cfg.sensitive_classes}
+    if cls_lower in sensitive_set:
+        return True
+    for sc in sensitive_set:
+        if sc and sc in cls_lower:
+            return True
+
+    sensitive_title_keywords = (
+        "private browsing",
+        "incognito",
+        "authentication required",
+        "unlock keyring",
+        "pinentry",
+        "enter password",
+    )
+    if any(kw in title_lower for kw in sensitive_title_keywords):
+        return True
+
+    return False
+
 
 _CURRENT_CONFIG: HyprsmartConfig | None = None
 _CONFIG_MTIME: float | None = None
@@ -39,6 +92,12 @@ def load_config() -> HyprsmartConfig:
     try:
         _CONFIG_MTIME = CONFIG_FILE.stat().st_mtime
         data = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) or {}
+        raw_sensitive = data.get("sensitive_classes")
+        if isinstance(raw_sensitive, list):
+            sensitive_classes = [str(c).strip().lower() for c in raw_sensitive if str(c).strip()]
+        else:
+            sensitive_classes = list(DEFAULT_SENSITIVE_CLASSES)
+
         _CURRENT_CONFIG = HyprsmartConfig(
             monitors={str(k): str(v) for k, v in data.get("monitors", {}).items()},
             default_wallpaper=data.get("default_wallpaper"),
@@ -49,6 +108,7 @@ def load_config() -> HyprsmartConfig:
             reeval_max_ticks=int(data.get("reeval_max_ticks", 11)),
             reeval_stable_ticks=int(data.get("reeval_stable_ticks", 8)),
             reeval_interval=float(data.get("reeval_interval", 1.0)),
+            sensitive_classes=sensitive_classes,
         )
     except Exception as e:
         print(f"[WARN] Failed to load config from {CONFIG_FILE}: {e}")
@@ -71,7 +131,12 @@ def get_current_config() -> HyprsmartConfig:
 
 def save_config(cfg: HyprsmartConfig) -> None:
     global _CURRENT_CONFIG, _CONFIG_MTIME
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        CONFIG_DIR.chmod(0o700)
+    except OSError:
+        pass
+
     data = {
         "monitors": cfg.monitors,
         "default_wallpaper": cfg.default_wallpaper,
@@ -82,8 +147,15 @@ def save_config(cfg: HyprsmartConfig) -> None:
         "reeval_max_ticks": cfg.reeval_max_ticks,
         "reeval_stable_ticks": cfg.reeval_stable_ticks,
         "reeval_interval": cfg.reeval_interval,
+        "sensitive_classes": cfg.sensitive_classes,
     }
-    CONFIG_FILE.write_text(yaml.dump(data, sort_keys=False), encoding="utf-8")
+    tmp_file = CONFIG_FILE.with_suffix(".tmp")
+    tmp_file.write_text(yaml.dump(data, sort_keys=False), encoding="utf-8")
+    try:
+        tmp_file.chmod(0o600)
+    except OSError:
+        pass
+    tmp_file.replace(CONFIG_FILE)
     try:
         _CONFIG_MTIME = CONFIG_FILE.stat().st_mtime
     except OSError:
@@ -92,8 +164,10 @@ def save_config(cfg: HyprsmartConfig) -> None:
 
 def set_monitor_wallpaper(mon_id_or_name: str, wall_path: str) -> HyprsmartConfig:
     cfg = get_current_config()
-    # Expand user/relative paths
-    resolved_path = str(Path(wall_path).expanduser().resolve())
+    p = Path(wall_path).expanduser().resolve()
+    if not p.is_file():
+        raise FileNotFoundError(f"Wallpaper path is not a regular file: {wall_path}")
+    resolved_path = str(p)
     cfg.monitors[str(mon_id_or_name)] = resolved_path
     save_config(cfg)
     return cfg

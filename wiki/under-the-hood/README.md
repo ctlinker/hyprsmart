@@ -47,6 +47,8 @@ Chaque document explore en profondeur un pilier technique :
    *Inversion mathématique de l'alpha compositing, profils de classe EMA et régularisation adaptative sans clignotement.*
 9. [**09. Réévaluation Progressive & Profils Dynamiques Émergents**](09_progressive_reevaluation_and_dynamic_profiles.md)
    *Boucle de surveillance annulable (11 ticks, arrêt anticipé à 8 ticks stables), court-circuit d'identité pixel 32x32, bascule de polarité, apprentissage de volatilité (`volatility`, `settle_time`) et amortissement anti-wobble / anti-hunting.*
+10. [**10. Modèle de Sécurité, Durcissement IPC & Bouclier de Confidentialité**](10_security_model_and_privacy_shield.md)
+   *Authentification SO_PEERCRED, permissions de socket 0o600, protection contre les captures de fenêtres sensibles, bornage anti-DoS des files d'attente et validation des adresses.*
 
 ---
 

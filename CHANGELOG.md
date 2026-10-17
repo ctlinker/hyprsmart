@@ -5,6 +5,32 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [0.8.2] - 2026-10-17
+
+### Sécurité & Durcissement
+- **Bouclier de confidentialité pour fenêtres sensibles (`is_sensitive_window` dans `config.py`)** :
+  - Détection et exclusion automatique des gestionnaires de mots de passe (`keepassxc`, `1password`, `bitwarden`), des prompters d'authentification (`polkit`, `gcr-prompter`, `pinentry`) et des sessions de navigation privée (`incognito`, `private browsing`).
+  - L'appel de capture `grim` est intégralement court-circuité, l'opacité opaque (`1.0`) est appliquée d'office et aucune donnée n'est envoyée dans les traces développeur.
+- **Durcissement du Socket UNIX & Authentification `SO_PEERCRED` (`control_server.py`)** :
+  - Isolation du répertoire d'exécution utilisateur (`0o700`) sans risque d'attaque par lien symbolique dans `/tmp`.
+  - Application stricte des permissions `0o600` sur le fichier socket `control.sock`.
+  - Contrôle cryptographique/noyau de l'identité du client appelant via `SO_PEERCRED` pour s'assurer que seul l'utilisateur propriétaire du démon peut envoyer des ordres de contrôle.
+- **Bornage des files d'attente mémoire & politique anti-saturation (`handle.py`)** :
+  - Limitation stricte de `CAPTURE_QUEUE` et `LUMINANCE_QUEUE` à 8 éléments avec éviction de l'élément le plus ancien (*drop oldest*) lors de rafales massives d'événements, éliminant tout risque de crash par dépassement de mémoire (*Out-Of-Memory*).
+- **Validation stricte des adresses de fenêtre (`window.py`)** :
+  - Validation préalable par expression régulière hexadécimale (`^0x[0-9a-fA-F]{1,16}$`) interdisant toute injection de syntaxe dans la commande de dispatch Hyprland (`hl.dsp.window.set_prop`).
+- **Protection des traces développeur & quota de rétention (`dev_trace.py`)** :
+  - Droits d'accès `0o700` sur le dossier `dev_captures/` et `0o600` sur les fichiers `.png` et `.json`.
+  - Quota glissant automatique (`MAX_DEV_BUNDLES = 30`) pour prémunir le disque contre toute saturation.
+- **Écriture atomique et sécurisée de `config.yaml` (`config.py`)** :
+  - Écriture via fichier `.tmp` intermédiaire et renommage atomique avec droits `0o600`.
+- **Interdiction de l'exécution en tant que superutilisateur (`cli.py`)** :
+  - Blocage immédiat avec message d'erreur si `geteuid() == 0`.
+- **Suite de tests de sécurité dédiée (`test_security_hardening.py`)** :
+  - 7 nouveaux tests validant le bouclier de confidentialité, le rejet des adresses malformées, l'authentification `SO_PEERCRED`, le bornage des files et l'atomicité de la configuration (total 45 tests au vert).
+
+---
+
 ## [0.8.1] - 2026-10-16
 
 ### Corrigé

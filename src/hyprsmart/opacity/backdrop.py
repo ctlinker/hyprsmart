@@ -124,6 +124,9 @@ def load_wallpaper(path: str, monitor_w: int, monitor_h: int) -> np.ndarray:
     For animated wallpapers (e.g. .gif / .webp), averages evenly-spaced frames
     across the animation to capture representative luminance rather than only frame 0.
     """
+    if not path or not os.path.isfile(path):
+        raise FileNotFoundError(f"Wallpaper path is not an accessible regular file: {path}")
+
     target_width = max(1, monitor_w // DOWN)
     target_height = max(1, monitor_h // DOWN)
 
@@ -165,7 +168,7 @@ def get_cached_wallpaper_backdrop_data(
     target_w = max(1, monitor_w // DOWN)
     target_h = max(1, monitor_h // DOWN)
 
-    if not path or not os.path.exists(path):
+    if not path or not os.path.isfile(path):
         # Default neutral background: dark 0.2, zero gradient
         return (
             np.full((target_h, target_w), 0.2, dtype=np.float32),

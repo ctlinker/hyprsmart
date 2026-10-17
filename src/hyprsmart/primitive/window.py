@@ -57,15 +57,26 @@ def capture_window(window: Window) -> bytes:
     return result.stdout
 
 
+import re
+
+ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{1,16}$")
+VALID_PROPS = {"opacity", "opacity_inactive"}
+
+
 def set_hyprland_win_opacity(
     address: str,
     opacity: float,
     opacity_inactive: float,
 ) -> None:
+    if not address or not ADDRESS_RE.match(address):
+        raise ValueError(f"Invalid or unsafe window address: {address!r}")
+
     for prop, value in (
         ("opacity", opacity),
         ("opacity_inactive", opacity_inactive),
     ):
+        if prop not in VALID_PROPS:
+            raise ValueError(f"Invalid property: {prop}")
         if not 0.0 <= value <= 1.1:
             raise ValueError(f"{prop} must be between 0.0 and 1.0")
 
