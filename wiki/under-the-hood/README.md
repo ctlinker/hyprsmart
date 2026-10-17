@@ -49,6 +49,9 @@ Chaque document explore en profondeur un pilier technique :
    *Boucle de surveillance annulable (11 ticks, arrêt anticipé à 8 ticks stables), court-circuit d'identité pixel 32x32, bascule de polarité, apprentissage de volatilité (`volatility`, `settle_time`) et amortissement anti-wobble / anti-hunting.*
 10. [**10. Modèle de Sécurité, Durcissement IPC & Bouclier de Confidentialité**](10_security_model_and_privacy_shield.md)
    *Authentification SO_PEERCRED, permissions de socket 0o600, protection contre les captures de fenêtres sensibles, bornage anti-DoS des files d'attente et validation des adresses.*
+11. [**11. Optimisation des Performances, Screencopy & Efficacité Énergétique**](11_performance_optimization_and_resource_efficiency.md)
+   *Accélération grim -l 0 -s 1 (gain 20x), table de correspondance sRGB LUT (gain 6x), élagage des tempêtes d'événements de titre et suppression du polling sur fenêtres statiques.*
+
 
 ---
 

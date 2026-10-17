@@ -507,9 +507,11 @@ def restore_all_managed_windows() -> None:
 
 
 DECISION_LOCK = Lock()
+CURRENT_ACTIVE_ADDRESS: str | None = None
 
 
 def handle_event(ev: HyprEvent) -> None:
+    global CURRENT_ACTIVE_ADDRESS
     if STOP_EVENT.is_set():
         return
 
@@ -517,6 +519,8 @@ def handle_event(ev: HyprEvent) -> None:
         addr = ev.content.strip().split(",")[0]
         if not addr.startswith("0x"):
             addr = f"0x{addr}"
+        if CURRENT_ACTIVE_ADDRESS == addr:
+            CURRENT_ACTIVE_ADDRESS = None
         PROGRESSIVE.cancel(addr, commit_partial=False)
         SCHEDULER.cancel(addr)
         cache_drop(addr)
@@ -529,23 +533,29 @@ def handle_event(ev: HyprEvent) -> None:
         # Cancel any progressive session belonging to a previously focused window
         raw_addr = ev.content.strip().split(",", 1)[0].strip()
         focused_addr = raw_addr if raw_addr.startswith("0x") or not raw_addr else f"0x{raw_addr}"
+        CURRENT_ACTIVE_ADDRESS = focused_addr or None
         active_sess = PROGRESSIVE.active_session
         if active_sess is not None and focused_addr and active_sess.address != focused_addr:
             PROGRESSIVE.cancel(active_sess.address, commit_partial=True)
         # Focus switch: snappy reaction, instant cache hit path
         SCHEDULER.schedule("active_window", 0.05, schedule_capture, force=False, progressive=True)
     elif ev.kind == "windowtitlev2":
-        # Title changes (URL/tab change, buffer change): only recapture if the title change
-        # belongs to the currently active window, ignoring unfocused background windows.
+        # Title changes (URL/tab change, buffer change):
+        # 1. Immediately drop events for unfocused background windows
         raw_addr = ev.content.strip().split(",", 1)[0].strip()
         target_addr = raw_addr if raw_addr.startswith("0x") or not raw_addr else f"0x{raw_addr}"
+        if CURRENT_ACTIVE_ADDRESS is not None and target_addr and target_addr != CURRENT_ACTIVE_ADDRESS:
+            return
+
+        # 2. Schedule debounced capture for active window without forced cache invalidation
         SCHEDULER.schedule(
             "active_window",
             0.25,
             schedule_capture,
-            force=True,
+            force=False,
             target_address=target_addr or None,
             progressive=True,
+            on_title_change=True,
         )
     elif ev.kind == "openwindow":
         # New window opening: wait for window painting to settle, then start progressive re-evaluation
@@ -563,12 +573,15 @@ def schedule_capture(
     force: bool = False,
     target_address: str | None = None,
     progressive: bool = False,
+    on_title_change: bool = False,
 ) -> None:
+    global CURRENT_ACTIVE_ADDRESS
     if STOP_EVENT.is_set():
         return
     win = get_hyprland_active_window()
     if win is None:
         return
+    CURRENT_ACTIVE_ADDRESS = win.address
     if target_address is not None and win.address != target_address:
         # Ignore title change events emitted by unfocused background windows
         return
@@ -588,6 +601,13 @@ def schedule_capture(
             pass
         PROGRESSIVE.cancel(win.address, commit_partial=False)
         return
+
+    # On title changes for proven static windows (terminals, editors with low volatility),
+    # avoid launching redundant progressive re-evaluation loops.
+    if on_title_change:
+        prof = get_class_profile(win.window_class)
+        if prof is not None and prof.volatility < 0.025 and prof.sample_count >= 3:
+            progressive = False
 
     if not force and (e := cache_get(win)):
         CACHE_HIT_QUEUE.put((win, e))

@@ -8,7 +8,38 @@ from hyprsmart.opacity.win_col import WindowVisuals
 from hyprsmart.primitive.window import Window
 
 _AUDIO_CACHE: tuple[float, set[int]] | None = None
-_AUDIO_CACHE_TTL = 0.5  # seconds
+_AUDIO_CACHE_TTL = 2.0  # seconds
+
+_PROC_PARENT_CACHE: dict[int, int] = {}
+_PROC_CACHE_TIME = 0.0
+
+
+def _get_parent_pid(pid: int) -> int:
+    global _PROC_PARENT_CACHE, _PROC_CACHE_TIME
+    now = time.time()
+    if now - _PROC_CACHE_TIME > 2.0:
+        _PROC_PARENT_CACHE.clear()
+        _PROC_CACHE_TIME = now
+
+    if pid in _PROC_PARENT_CACHE:
+        return _PROC_PARENT_CACHE[pid]
+
+    try:
+        status_path = f"/proc/{pid}/status"
+        if not os.path.exists(status_path):
+            _PROC_PARENT_CACHE[pid] = 0
+            return 0
+        ppid = 0
+        with open(status_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if line.startswith("PPid:"):
+                    ppid = int(line.split()[1])
+                    break
+        _PROC_PARENT_CACHE[pid] = ppid
+        return ppid
+    except (OSError, ValueError):
+        _PROC_PARENT_CACHE[pid] = 0
+        return 0
 
 
 def get_active_audio_pids(force_refresh: bool = False) -> set[int]:
@@ -106,6 +137,9 @@ def is_pid_emitting_audio(target_pid: int, active_audio_pids: set[int] | None = 
     if active_audio_pids is None:
         active_audio_pids = get_active_audio_pids()
 
+    if not active_audio_pids:
+        return False
+
     if target_pid in active_audio_pids:
         return True
 
@@ -116,21 +150,10 @@ def is_pid_emitting_audio(target_pid: int, active_audio_pids: set[int] | None = 
         visited = set()
         while curr > 1 and curr not in visited:
             visited.add(curr)
-            try:
-                status_path = f"/proc/{curr}/status"
-                if not os.path.exists(status_path):
-                    break
-                ppid = 0
-                with open(status_path, "r", encoding="utf-8", errors="ignore") as f:
-                    for line in f:
-                        if line.startswith("PPid:"):
-                            ppid = int(line.split()[1])
-                            break
-                if ppid == target_pid:
-                    return True
-                curr = ppid
-            except (OSError, ValueError):
-                break
+            ppid = _get_parent_pid(curr)
+            if ppid == target_pid:
+                return True
+            curr = ppid
 
     return False
 

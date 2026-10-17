@@ -96,7 +96,7 @@ def window_colors(
     seed_rgb = flat_rgb[seed_mask].mean(axis=0)
     raw_bg_l = float(_luminance(seed_rgb))
 
-    lum = _luminance(rgb.astype(np.float32))
+    lum = _luminance(rgb)
     grad = compute_sobel_energy(lum)
 
     safe_alpha = max(0.20, min(1.0, float(current_alpha)))
@@ -105,8 +105,13 @@ def window_colors(
     # Include neighboring bins within perceptual RGB/luminance tolerance on smooth (non-edge) surfaces
     rgb_tol = 22.0 + bleed_allowance * 75.0
     lum_tol = 0.045 + bleed_allowance * 0.22
-    rgb_dist = np.max(np.abs(flat_rgb - seed_rgb), axis=1).reshape(lum.shape)
-    bg_cluster_mask = ((rgb_dist <= rgb_tol) | (np.abs(lum - raw_bg_l) <= lum_tol)) & (grad <= 0.07)
+    smooth_mask = grad <= 0.07
+    bg_cluster_mask = np.zeros(lum.shape, dtype=bool)
+    if np.any(smooth_mask):
+        lum_diff_smooth = np.abs(lum[smooth_mask] - raw_bg_l)
+        flat_rgb_smooth = flat_rgb[smooth_mask.ravel()]
+        rgb_dist_smooth = np.max(np.abs(flat_rgb_smooth - seed_rgb), axis=1)
+        bg_cluster_mask[smooth_mask] = (rgb_dist_smooth <= rgb_tol) | (lum_diff_smooth <= lum_tol)
 
     cluster_bg_ratio = float(np.mean(bg_cluster_mask))
     single_bin_ratio = float(counts[top_idx] / len(packed))

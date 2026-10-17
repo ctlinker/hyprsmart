@@ -49,7 +49,7 @@ def capture_window(window: Window) -> bytes:
     geometry = f"{gx},{gy} {gw}x{gh}"
 
     result = subprocess.run(
-        ["grim", "-g", geometry, "-"],
+        ["grim", "-l", "0", "-s", "1", "-g", geometry, "-"],
         capture_output=True,
         check=True,
     )
