@@ -161,7 +161,7 @@ def get_adaptive_reeval_budget(
 
     # Proven static classes (e.g. terminals with negligible post-open visual change)
     if prof.volatility < 0.025 and prof.settle_time <= 1.0:
-        return max(3, max_ticks_cfg // 2), max(2, base_stable // 3)
+        return 0, 1
 
     # Moderately dynamic classes (fast-settling GUI apps)
     if prof.volatility < 0.06 and prof.settle_time <= 3.0:
