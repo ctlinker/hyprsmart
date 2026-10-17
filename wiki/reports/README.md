@@ -7,6 +7,8 @@ Ce dossier rassemble les comptes-rendus systématiques des interventions de dév
 ## 1. Sommaire Thématique par Jalon
 
 ### Jalon v0.8.x — Réévaluation Progressive, Anti-Wobble & Durcissement Sécurité
+- [**2026-10-17 — Fusion vers `dev` des optimisations de performances & réduction CPU (`v0.8.4`)**](2026-10-17_fusion_dev_optimisations_performances.md)  
+  *Intégration de `feat/perf-optimizations` dans `dev`, gain screencopy 20x, sRGB LUT 6x, suppression du polling statique (60 tests réussis).*
 - [**2026-10-17 — Optimisations de performances, réduction CPU & efficacité screencopy (`v0.8.4`)**](2026-10-17_optimisations_performances_et_reduction_cpu.md)  
   *Accélération de grim (-l 0 -s 1, gain 20x), table de correspondance sRGB LUT (gain 6x), élagage des tempêtes windowtitlev2 et suppression du polling statique.*
 - [**2026-10-17 — Fusion vers `dev` du durcissement de sécurité & blacklist externe (`v0.8.3`)**](2026-10-17_fusion_dev_durcissement_securite.md)  
