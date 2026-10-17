@@ -7,6 +7,10 @@ Ce dossier rassemble les comptes-rendus systématiques des interventions de dév
 ## 1. Sommaire Thématique par Jalon
 
 ### Jalon v0.8.x — Réévaluation Progressive, Anti-Wobble & Durcissement Sécurité
+- [**2026-10-17 — Fusion vers `dev` du durcissement de sécurité & blacklist externe (`v0.8.3`)**](2026-10-17_fusion_dev_durcissement_securite.md)  
+  *Intégration de `feat/hardened-security` dans `dev`, bouclier de confidentialité, SO_PEERCRED, bornage des files et blacklist en lecture seule (55 tests réussis).*
+- [**2026-10-17 — Externalisation de la blacklist en lecture seule & escalade de privilèges (`v0.8.3`)**](2026-10-17_externalisation_blacklist_et_escalade_privileges.md)  
+  *Séparation de `sensitive_classes` dans `blacklist.yaml` (`0o444`), escalade Polkit/sudo atomique via `install -m 0444 -D` et commande CLI `hyprsmart blacklist`.*
 - [**2026-10-17 — Durcissement sécurité, surface d'attaque & bouclier de confidentialité (`v0.8.2`)**](2026-10-17_durcissement_securite_et_bouclier_confidentialite.md)  
   *Bouclier de confidentialité pour fenêtres sensibles, authentification SO_PEERCRED, bornage des files à 8 éléments, validation regex des adresses et droits stricts 0o700/0o600.*
 - [**2026-10-16 — Fusion vers `dev` de la réévaluation progressive (`v0.8.1`)**](2026-10-16_fusion_dev_reevaluation_progressive.md)  
