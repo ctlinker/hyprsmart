@@ -1,140 +1,89 @@
 <div align="center">
 
-<img src="docs/assets/logo.png" alt="HyprSmart Logo" width="220" />
+<img src="docs/assets/logo.png" alt="HyprSmart Logo" width="200" />
 
-# hyprsmart
-### *Adaptive intelligence for Hyprland*
+# HyprSmart
+### *Adaptive window transparency for Hyprland*
 
 [![Python](https://img.shields.io/badge/Python-3.14+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Hyprland](https://img.shields.io/badge/Hyprland-Wayland-00B4D8?style=flat-square)](https://hyprland.org)
 [![WCAG 2.1](https://img.shields.io/badge/Accessibility-WCAG%202.1-4CAF50?style=flat-square)](https://www.w3.org/WAI/standards-guidelines/wcag/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
-*Real-time, deterministic, and ergonomically calibrated window transparency for the Hyprland Wayland compositor.*
+*Effortless, intelligent transparency that automatically adapts to your wallpaper and window content.*
 
 </div>
 
 ---
 
-## What is HyprSmart?
+## Why HyprSmart?
 
-Hyprland's window transparency is gorgeous—until a light wallpaper renders your code editor illegible, or a dark video player gets washed out. Constantly juggling manual toggles (`toggleopaque`) is disruptive to workflow and breaks immersion.
+Hyprland's window transparency looks fantastic—until a bright wallpaper makes your terminal or code editor impossible to read, or a dark video gets washed out. 
 
-**HyprSmart** acts as an adaptive perceptual daemon. It continuously observes window activity, analyses foreground text and background dominance, measures the exact wallpaper clutter behind each window, and dynamically computes the optimal opacity level. 
+Constantly toggling opacity manually breaks your focus. **HyprSmart** runs quietly in the background as a lightweight daemon:
+- It monitors the window you are working in.
+- It samples the exact area of wallpaper behind that window.
+- It dynamically computes and applies the ideal opacity level so that your text remains crisp and readable, adhering to **WCAG contrast standards**.
+- When you watch a video or switch to sensitive apps, it adapts automatically.
 
-Every adjustment guarantees text clarity according to **WCAG 2.x relative luminance contrast standards**, giving you effortless, beautiful transparency that never sacrifices readability.
-
----
-
-## Key Features
-
-- **Mathematical Determinism (Zero Latency)**: No heavy AI models, OCR, or local LLM inferencing in the loop. Opacity decisions are computed in $< 1.5\text{ ms}$ using vectorized sRGB relative luminance and Sobel edge energy.
-- **Optical Unblending (Deconvolution)**: Eliminates screen flashes and transparency feedback loops. Transparent windows are captured as-is and their pure original colors are mathematically reconstructed by inverting alpha compositing ($L_{pure} = \frac{L_{captured} - (1 - \alpha) L_{backdrop}}{\alpha}$).
-- **Multi-Signal Video Detection**: Distinguishes streaming video and multimedia windows from static text documents using PipeWire audio emission markers, idle-inhibition flags, full-screen states, and low text density. Automatically clamps opacity (e.g. `0.92` - `1.0`) to preserve contrast.
-- **Universal Startup Preloading**: When the daemon launches, all open windows across all workspaces and monitors immediately adopt their ideal transparency using cached profiles, without requiring manual clicks or focus shifts.
-- **Persistent & Emergent Dynamic Profiles (`~/.config/hyprsmart/profiles.json`)**: Automatically learns visual fingerprints (`text_l`, `bg_l`, `text_density`, `bg_ratio`) and temporal dynamics (`volatility`, `settle_time`, `sample_count`) per window class using Exponential Moving Averages (EMA).
-- **Cancelable Progressive Re-evaluation**: Tracks slow-loading windows (browsers, SPAs, Electron apps) across up to `11` one-second ticks (stopping early after `8` consecutive stable seconds), adapting the probing budget per class as its dynamic profile emerges.
-- **Anti-Wobble & Anti-Hunting Stabilization**: Guarantees silky-smooth settling on dynamic pages (carousels, cursor blinking, CSS animations) through low-pass EMA temporal damping on micro-jumps ($\le 0.10$), $50\%$ attenuation of spatial texture noise, and sensitivity threshold annealing after $t > 3\text{s}$.
-- **Polarity-Flip Adaptation**: Detects major contrast shifts ($|\Delta L| > 0.25$, e.g. dark splash screen to white web page) and immediately bypasses class regularization for instant $100\%$ adaptation.
-- **Privacy Shield & IPC Hardening**: Built-in credential shield prevents screen capture of password managers (`keepassxc`, `bitwarden`, `1password`, `polkit`, incognito sessions) by automatically forcing them fully opaque without saving pixels. Control sockets enforce strict `0o600` permissions and kernel-level `SO_PEERCRED` caller UID authorization.
-- **Micro-Reactive Adjustments**: Focus switches, window dragging across light/dark wallpaper areas, and resizing seamlessly trigger microscopic opacity updates tailored in real-time to the user's eye.
+No screen flashes. No heavy AI models. Just instant, beautiful, and readable transparency.
 
 ---
 
-## Architectural Flow
+## Features at a Glance
 
-```mermaid
-graph TD
-    A[Hyprland Socket2 Events] -->|activewindow / move / title| B(Debounced Scheduler)
-    B --> C{Profile Cached in profiles.json?}
-    C -->|Yes: Startup & Focus| D[Slice Wallpaper Under Geometry]
-    C -->|No / Title Change| E[grim Capture + Progressive Re-evaluator]
-    E --> F[Optical Unblending & Polarity-Flip Check]
-    F --> G[Extract Window Visuals & Converged Class EMA]
-    G --> D
-    D --> H[Sobel Edge Energy & Backdrop Saliency]
-    H --> I[Dual-Constraint WCAG Solver]
-    I --> J[Anti-Hunting & Temporal EMA Damping]
-    J --> K{Delta alpha >= 0.03?}
-    K -->|Yes| L[hyprctl Dispatch Opacity]
-    K -->|No| M[Skip IPC - Zero Flicker]
-```
+- **Always Readable**: Guarantees optimal text contrast regardless of whether your wallpaper is light, dark, or cluttered.
+- **Smart Video Detection**: Automatically keeps video players and streaming tabs opaque to preserve immersion and image quality.
+- **Privacy Shield**: Password managers (Bitwarden, KeePassXC, 1Password) and private browsing windows are automatically kept fully opaque and shielded from screen sampling.
+- **Zero Configuration Needed**: Works out of the box with sensible defaults; learns your applications' profiles over time.
+- **Systemd Integration**: Runs seamlessly as a systemd user service alongside your Hyprland session.
 
 ---
 
-## Installation & Requirements
+## Installation
 
-### System Requirements
-- **OS**: Linux with Wayland
-- **Compositor**: [Hyprland](https://hyprland.org) ($\ge 0.40.0$)
-- **Runtime Tools**: `grim` (for screen captures), `hyprctl`, and PipeWire (`pactl` or `pw-cli`)
-- **Build Tools**: `uv` ($\ge 0.5.0$) and `python` ($\ge 3.14$)
+### Arch Linux (Recommended)
 
----
-
-### Method 1: Arch Linux (Recommended)
-
-HyprSmart provides native PKGBUILD packaging for Arch Linux, generating a standalone distribution with systemd user unit integration:
+Clone the repository and run the automated installer:
 
 ```bash
-# Clone the repository
 git clone https://github.com/ctlinker/hyprsmart.git
 cd hyprsmart
-
-# Build and install package via makepkg + enable service in one step:
 ./install.sh --arch --enable
-
-# Or manually via makepkg:
-cd packaging/arch
-makepkg -si
-systemctl --user enable --now hyprsmart.service
 ```
 
----
+> **Tip**: This builds the native Arch package via `makepkg` and immediately enables the systemd user service.
 
-### Method 2: Automated Universal Installer (`install.sh`)
+### Other Distributions / Manual Install
 
-The included `install.sh` script automates compilation, installation, systemd setup, and uninstallation across any Linux distribution:
+The universal installer also supports system-wide and user-level installations:
 
 ```bash
-# 1. System-wide installation (/opt/hyprsmart, /usr/bin/hyprsmart, systemd service)
+# System-wide installation (/opt/hyprsmart + /usr/bin/hyprsmart)
 ./install.sh --system --enable
 
-# 2. Local unprivileged installation (~/.local/share/hyprsmart, ~/.local/bin/)
+# User-level installation (~/.local/bin) without sudo
 ./install.sh --user --enable
+```
 
-# 3. Complete uninstallation
+To uninstall at any time:
+```bash
 ./install.sh --uninstall
 ```
 
 ---
 
-### Method 3: Development Environment via `uv`
+## Autostart
 
-If you are developing or testing directly from source:
-
-```bash
-git clone https://github.com/ctlinker/hyprsmart.git
-cd hyprsmart/hyprsmart
-uv sync
-uv run hyprsmart start -f
-```
-
----
-
-### Autostarting HyprSmart
-
-You can choose either of two autostart mechanisms:
-
-#### Option A: systemd User Service (Recommended)
-HyprSmart installs a native systemd user unit (`hyprsmart.service`) configured with `WantedBy=graphical-session.target` and `ConditionEnvironment=WAYLAND_DISPLAY`:
+### Option A: systemd User Service (Recommended)
+If you didn't pass `--enable` during installation, enable and start the service with:
 
 ```bash
 systemctl --user enable --now hyprsmart.service
 ```
 
-#### Option B: Hyprland Autostart (`hyprland.conf`)
-Alternatively, start the daemon directly in `~/.config/hypr/hyprland.conf`:
+### Option B: Hyprland Config (`hyprland.conf`)
+Alternatively, add this line to `~/.config/hypr/hyprland.conf`:
 
 ```ini
 exec-once = hyprsmart start
@@ -142,116 +91,62 @@ exec-once = hyprsmart start
 
 ---
 
-## Usage
+## Quick Usage
 
-### Controlling the Daemon
+Once installed, use the `hyprsmart` CLI to control the daemon:
+
 ```bash
-# Start the resident daemon in the background
-hyprsmart start
+# Check daemon status
+hyprsmart status
 
-# Inspect live decision logs in real-time
+# Watch live opacity decisions in real-time
 hyprsmart what-is-it-doing --watch
 
-# Inspect the last 20 actions
-hyprsmart what-is-it-doing -n 20
-
-# Stop the daemon (automatically restores all windows to 1.0)
+# Stop the daemon (automatically restores all windows to 100% opacity)
 hyprsmart stop
+
+# Start the daemon in background
+hyprsmart start
 ```
 
-### Inspecting & Tweaking Settings
-HyprSmart features an interactive CLI settings manager:
+### Basic Settings
+
+Adjust key settings on the fly without restarting:
 
 ```bash
-# View all active settings, bounds, and descriptions
+# View current settings
 hyprsmart settings
 
-# Adjust the target WCAG contrast ratio (default: 6.0 — sweet spot for legibility & aesthetics)
-hyprsmart settings target_contrast 6.0
-
-# Adjust minimum transparency floor (default: 0.5)
+# Set minimum opacity floor (e.g. 0.45)
 hyprsmart settings floor_opacity 0.45
 
-# Adjust fixed opacity for detected video streams (default: 0.92)
-hyprsmart settings video_opacity 0.95
-
-# Configure progressive re-evaluation ticks and early-stop stability
-hyprsmart settings reeval_max_ticks 11
-hyprsmart settings reeval_stable_ticks 8
+# Adjust target contrast (default: 6.0)
+hyprsmart settings target_contrast 6.0
 ```
 
-### Privacy Shield & Blacklist Manager (`blacklist.yaml`)
-Sensitive applications (password managers, 2FA prompt dialogs, private browser windows) are shielded from screen capture and forced to full opacity (`1.0`). To prevent local unprivileged malware from tampering with the blacklist, sensitive classes reside in a dedicated, read-only file (`~/.config/hyprsmart/blacklist.yaml` or `/etc/hyprsmart/blacklist.yaml`, mode `0444`) managed through privilege escalation (`pkexec` / `sudo`):
+### Protecting Sensitive Apps
+
+Add sensitive window classes to the built-in privacy shield:
 
 ```bash
-# View active blacklist, file path, read-only permissions, and escalation tool
-hyprsmart blacklist
+# List shielded applications
+hyprsmart blacklist list
 
-# Add sensitive window classes (triggers Polkit/sudo authorization prompt)
-hyprsmart blacklist add keepassxc 1password bitwarden
-
-# Remove window classes
-hyprsmart blacklist remove bitwarden
-
-# Enforce read-only lock (0444) or promote to system-wide root-owned file
-hyprsmart blacklist lock
-hyprsmart blacklist lock --system
-```
-
-### Developer Diagnostic Snapshot Mode
-Capture immediate decision artifacts for debugging without modifying ongoing workflows:
-
-```bash
-# Capture the active window, compute the WCAG decision, and save before.png, after.png,
-# and metadata.json (complete solver logs, backdrop slicing, and contrast breakdown)
-hyprsmart --yes-am-a-dev-on-this-project-and-i-fully-understand-what-this-flag-does
-```
-Artifacts are automatically deposited in `~/.local/state/hyprsmart/dev_captures/` with detailed timestamps.
-
----
-
-## Configuration (`config.yaml`)
-
-Configuration files are located in `~/.config/hyprsmart/config.yaml`:
-
-```yaml
-monitors:
-  '0': /home/user/Pictures/Wallpapers/mountain.png
-  eDP-1: /home/user/Pictures/Wallpapers/mountain.png
-default_wallpaper: /home/user/Pictures/Wallpapers/default.png
-target_contrast: 6.0
-floor_opacity: 0.5
-video_opacity: 0.92
-debounce_interval: 0.1
-reeval_max_ticks: 11
-reeval_stable_ticks: 8
-reeval_interval: 1.0
+# Add an app to the shield
+hyprsmart blacklist add myapp
 ```
 
 ---
 
-## Documentation & Wiki
+## Technical Documentation & Development
 
-Explore the complete technical specifications and session journals in our **[Wiki](docs/wiki/README.md)**:
+Looking for the mathematical formulas, architectural diagrams, developer flags, or source code build instructions?
 
-- **[Under the Hood](docs/wiki/under-the-hood/README.md)**:
-  - [01. sRGB Relative Luminance & WCAG Contrast](docs/wiki/under-the-hood/01_wcag_relative_luminance.md)
-  - [02. Spatial Gradients & Sobel Edge Energy](docs/wiki/under-the-hood/02_spatial_gradient_and_edge_detection.md)
-  - [03. Window Content Analysis & Bit-Shift Quantization](docs/wiki/under-the-hood/03_window_content_analysis.md)
-  - [04. Wallpaper Sampling & Coordinate Geometry](docs/wiki/under-the-hood/04_wallpaper_sampling_and_caching.md)
-  - [05. Wayland IPC & Multi-Threaded Architecture](docs/wiki/under-the-hood/05_wayland_ipc_and_threading.md)
-  - [06. Multi-Signal Video Detection](docs/wiki/under-the-hood/06_multi_signal_video_detection.md)
-  - [07. Dynamic Caching & Trailing Debounce](docs/wiki/under-the-hood/07_dynamic_caching_and_deferred_execution.md)
-  - [08. Optical Unblending & Persistent Class Profiles](docs/wiki/under-the-hood/08_optical_unblending_and_class_profiles.md)
-  - [09. Progressive Re-evaluation, Dynamic Profiles & Anti-Wobble](docs/wiki/under-the-hood/09_progressive_reevaluation_and_dynamic_profiles.md)
-  - [10. Security Model, IPC Hardening & Privacy Shield](docs/wiki/under-the-hood/10_security_model_and_privacy_shield.md)
-  - [11. Performance Optimization & Resource Efficiency](docs/wiki/under-the-hood/11_performance_optimization_and_resource_efficiency.md)
-  - [12. Packaging Architecture & systemd User Session Integration](docs/wiki/under-the-hood/12_packaging_and_systemd_daemon.md)
-  - [Archives: Historical & Deprecated Architectures](docs/wiki/under-the-hood/archives/README.md)
-- **[Session Reports](docs/wiki/reports/README.md)**: Chronological index of all development reports and design decisions.
+- [**Technical & Developer Guide (`hyprsmart/README.md`)**](hyprsmart/README.md): Internal architecture, pipeline flowchart, optical unblending formulas, development with `uv`, tests, and diagnostics.
+- [**HyprSmart Wiki (`docs/wiki/README.md`)**](docs/wiki/README.md): In-depth technical papers on WCAG luminance, Sobel clutter detection, PipeWire video detection, and session journals.
 
 ---
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+Distributed under the [MIT License](LICENSE).
