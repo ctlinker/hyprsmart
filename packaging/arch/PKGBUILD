@@ -1,0 +1,44 @@
+pkgname=hyprsmart
+pkgver=0.8.5
+pkgrel=1
+pkgdesc="Adaptive transparency daemon for Hyprland"
+arch=('x86_64' 'aarch64')
+url="https://github.com/ctlinker/hyprsmart"
+license=('Apache-2.0')
+depends=('glibc' 'hyprland' 'grim')
+makedepends=('python' 'uv')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$srcdir/$pkgname-$pkgver/hyprsmart"
+    uv venv
+    uv sync
+    uv run python -m PyInstaller \
+        --clean \
+        --noconfirm \
+        --onedir \
+        --name hyprsmart \
+        --collect-all numpy \
+        --collect-all PIL \
+        --collect-all yaml \
+        src/hyprsmart/__main__.py
+}
+
+package() {
+
+    # Cmd setup
+    cd "$srcdir/$pkgname-$pkgver/hyprsmart"
+
+    install -dm755 "$pkgdir/opt/hyprsmart"
+    cp -a dist/hyprsmart/. "$pkgdir/opt/hyprsmart/"
+
+    install -dm755 "$pkgdir/usr/bin"
+    ln -s /opt/hyprsmart/hyprsmart "$pkgdir/usr/bin/hyprsmart"
+
+    #Service setup
+    cd ..
+    cp ./packaging/arch/hyprsmart.service /opt/hyprsmart/
+    systemctl enable --user /opt/hyprsmart/hyprsmart.service
+
+}

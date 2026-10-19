@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="HyprSmart Logo" width="220" />
+<img src="docs/assets/logo.png" alt="HyprSmart Logo" width="220" />
 
 # hyprsmart
 ### *Adaptive intelligence for Hyprland*

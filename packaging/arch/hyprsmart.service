@@ -1,0 +1,12 @@
+[Unit]
+Description=HyprSmart adaptive window transparency
+After=graphical.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/hyprsmart start --foreground
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
