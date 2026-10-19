@@ -662,10 +662,18 @@ def cmd_blacklist(args: argparse.Namespace) -> None:
         _notify_daemon_reload()
 
 
+VERSION = "0.8.6"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="hyprsmart",
         description="HyprSmart: Dynamic accessibility & transparency daemon for Hyprland",
+    )
+    parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version=f"%(prog)s {VERSION}",
     )
     parser.add_argument(
         DEV_FLAG_NAME,

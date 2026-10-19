@@ -1,4 +1,4 @@
-from hyprsmart.cli import main
+from hyprsmart.cli import VERSION as __version__, main
 from hyprsmart.config import get_current_config, load_config
 from hyprsmart.daemon import (
     handle_event,
@@ -8,6 +8,7 @@ from hyprsmart.daemon import (
 )
 
 __all__ = [
+    "__version__",
     "main",
     "load_config",
     "get_current_config",

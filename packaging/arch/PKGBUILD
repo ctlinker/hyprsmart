@@ -1,5 +1,5 @@
 pkgname=hyprsmart
-pkgver=0.8.5
+pkgver=0.8.6
 pkgrel=1
 pkgdesc="Adaptive transparency daemon for Hyprland"
 arch=('x86_64' 'aarch64')
@@ -9,10 +9,11 @@ depends=('glibc' 'hyprland' 'grim')
 makedepends=('python' 'uv')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
+options=('!strip')
 
 build() {
     cd "$srcdir/$pkgname-$pkgver/hyprsmart"
-    uv venv
+    uv venv --clear
     uv sync
     uv run python -m PyInstaller \
         --clean \
@@ -26,19 +27,16 @@ build() {
 }
 
 package() {
+    cd "$srcdir/$pkgname-$pkgver"
 
-    # Cmd setup
-    cd "$srcdir/$pkgname-$pkgver/hyprsmart"
-
+    # 1. Install application files to /opt/hyprsmart
     install -dm755 "$pkgdir/opt/hyprsmart"
-    cp -a dist/hyprsmart/. "$pkgdir/opt/hyprsmart/"
+    cp -a hyprsmart/dist/hyprsmart/. "$pkgdir/opt/hyprsmart/"
 
+    # 2. Create symlink in /usr/bin
     install -dm755 "$pkgdir/usr/bin"
     ln -s /opt/hyprsmart/hyprsmart "$pkgdir/usr/bin/hyprsmart"
 
-    #Service setup
-    cd ..
-    cp ./packaging/arch/hyprsmart.service /opt/hyprsmart/
-    systemctl enable --user /opt/hyprsmart/hyprsmart.service
-
+    # 3. Install the systemd user service correctly
+    install -Dm644 packaging/arch/hyprsmart.service "$pkgdir/usr/lib/systemd/user/hyprsmart.service"
 }

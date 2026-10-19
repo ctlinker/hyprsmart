@@ -67,14 +67,77 @@ graph TD
 ### System Requirements
 - **OS**: Linux with Wayland
 - **Compositor**: [Hyprland](https://hyprland.org) ($\ge 0.40.0$)
-- **Tools**: `grim` (for screen captures), `hyprctl`, and PipeWire (`pactl` or `pw-cli`)
-- **Python**: $\ge 3.14$ (or running via `uv`)
+- **Runtime Tools**: `grim` (for screen captures), `hyprctl`, and PipeWire (`pactl` or `pw-cli`)
+- **Build Tools**: `uv` ($\ge 0.5.0$) and `python` ($\ge 3.14$)
 
-### Installation via uv
+---
+
+### Method 1: Arch Linux (Recommended)
+
+HyprSmart provides native PKGBUILD packaging for Arch Linux, generating a standalone distribution with systemd user unit integration:
+
 ```bash
+# Clone the repository
 git clone https://github.com/ctlinker/hyprsmart.git
 cd hyprsmart
+
+# Build and install package via makepkg + enable service in one step:
+./install.sh --arch --enable
+
+# Or manually via makepkg:
+cd packaging/arch
+makepkg -si
+systemctl --user enable --now hyprsmart.service
+```
+
+---
+
+### Method 2: Automated Universal Installer (`install.sh`)
+
+The included `install.sh` script automates compilation, installation, systemd setup, and uninstallation across any Linux distribution:
+
+```bash
+# 1. System-wide installation (/opt/hyprsmart, /usr/bin/hyprsmart, systemd service)
+./install.sh --system --enable
+
+# 2. Local unprivileged installation (~/.local/share/hyprsmart, ~/.local/bin/)
+./install.sh --user --enable
+
+# 3. Complete uninstallation
+./install.sh --uninstall
+```
+
+---
+
+### Method 3: Development Environment via `uv`
+
+If you are developing or testing directly from source:
+
+```bash
+git clone https://github.com/ctlinker/hyprsmart.git
+cd hyprsmart/hyprsmart
 uv sync
+uv run hyprsmart start -f
+```
+
+---
+
+### Autostarting HyprSmart
+
+You can choose either of two autostart mechanisms:
+
+#### Option A: systemd User Service (Recommended)
+HyprSmart installs a native systemd user unit (`hyprsmart.service`) configured with `WantedBy=graphical-session.target` and `ConditionEnvironment=WAYLAND_DISPLAY`:
+
+```bash
+systemctl --user enable --now hyprsmart.service
+```
+
+#### Option B: Hyprland Autostart (`hyprland.conf`)
+Alternatively, start the daemon directly in `~/.config/hypr/hyprland.conf`:
+
+```ini
+exec-once = hyprsmart start
 ```
 
 ---
@@ -169,21 +232,23 @@ reeval_interval: 1.0
 
 ## Documentation & Wiki
 
-Explore the complete technical specifications and session journals in our **[Wiki](wiki/README.md)**:
+Explore the complete technical specifications and session journals in our **[Wiki](docs/wiki/README.md)**:
 
-- **[Under the Hood](wiki/under-the-hood/README.md)**:
-  - [01. sRGB Relative Luminance & WCAG Contrast](wiki/under-the-hood/01_wcag_relative_luminance.md)
-  - [02. Spatial Gradients & Sobel Edge Energy](wiki/under-the-hood/02_spatial_gradient_and_edge_detection.md)
-  - [03. Window Content Analysis & Bit-Shift Quantization](wiki/under-the-hood/03_window_content_analysis.md)
-  - [04. Wallpaper Sampling & Coordinate Geometry](wiki/under-the-hood/04_wallpaper_sampling_and_caching.md)
-  - [05. Wayland IPC & Multi-Threaded Architecture](wiki/under-the-hood/05_wayland_ipc_and_threading.md)
-  - [06. Multi-Signal Video Detection](wiki/under-the-hood/06_multi_signal_video_detection.md)
-  - [07. Dynamic Caching & Trailing Debounce](wiki/under-the-hood/07_dynamic_caching_and_deferred_execution.md)
-  - [08. Optical Unblending & Persistent Class Profiles](wiki/under-the-hood/08_optical_unblending_and_class_profiles.md)
-  - [09. Progressive Re-evaluation, Dynamic Profiles & Anti-Wobble](wiki/under-the-hood/09_progressive_reevaluation_and_dynamic_profiles.md)
-  - [10. Security Model, IPC Hardening & Privacy Shield](wiki/under-the-hood/10_security_model_and_privacy_shield.md)
-  - [Archives: Historical & Deprecated Architectures](wiki/under-the-hood/archives/README.md)
-- **[Session Reports](wiki/reports/README.md)**: Chronological index of all 20+ development reports and design decisions.
+- **[Under the Hood](docs/wiki/under-the-hood/README.md)**:
+  - [01. sRGB Relative Luminance & WCAG Contrast](docs/wiki/under-the-hood/01_wcag_relative_luminance.md)
+  - [02. Spatial Gradients & Sobel Edge Energy](docs/wiki/under-the-hood/02_spatial_gradient_and_edge_detection.md)
+  - [03. Window Content Analysis & Bit-Shift Quantization](docs/wiki/under-the-hood/03_window_content_analysis.md)
+  - [04. Wallpaper Sampling & Coordinate Geometry](docs/wiki/under-the-hood/04_wallpaper_sampling_and_caching.md)
+  - [05. Wayland IPC & Multi-Threaded Architecture](docs/wiki/under-the-hood/05_wayland_ipc_and_threading.md)
+  - [06. Multi-Signal Video Detection](docs/wiki/under-the-hood/06_multi_signal_video_detection.md)
+  - [07. Dynamic Caching & Trailing Debounce](docs/wiki/under-the-hood/07_dynamic_caching_and_deferred_execution.md)
+  - [08. Optical Unblending & Persistent Class Profiles](docs/wiki/under-the-hood/08_optical_unblending_and_class_profiles.md)
+  - [09. Progressive Re-evaluation, Dynamic Profiles & Anti-Wobble](docs/wiki/under-the-hood/09_progressive_reevaluation_and_dynamic_profiles.md)
+  - [10. Security Model, IPC Hardening & Privacy Shield](docs/wiki/under-the-hood/10_security_model_and_privacy_shield.md)
+  - [11. Performance Optimization & Resource Efficiency](docs/wiki/under-the-hood/11_performance_optimization_and_resource_efficiency.md)
+  - [12. Packaging Architecture & systemd User Session Integration](docs/wiki/under-the-hood/12_packaging_and_systemd_daemon.md)
+  - [Archives: Historical & Deprecated Architectures](docs/wiki/under-the-hood/archives/README.md)
+- **[Session Reports](docs/wiki/reports/README.md)**: Chronological index of all development reports and design decisions.
 
 ---
 

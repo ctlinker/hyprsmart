@@ -3,6 +3,28 @@
 Toutes les modifications notables apportées à ce projet sont consignées dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/) et ce projet adhère à [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.8.6] - 2026-10-19
+
+### Packaging, Intégration systemd & Installation Universelle
+- **Correction critique de l'unité utilisateur systemd (`packaging/arch/hyprsmart.service`)** :
+  - Remplacement de `WantedBy=multi-user.target` par `WantedBy=graphical-session.target`. Dans l'instance `systemd --user`, `multi-user.target` n'existe pas, ce qui créait un lien orphelin dans `multi-user.target.wants/` et empêchait le démarrage automatique du démon à l'ouverture de session.
+  - Ajout des directives d'environnement et de cycle de vie : `PartOf=graphical-session.target`, `After=graphical-session.target`, `ConditionEnvironment=WAYLAND_DISPLAY` (pour éviter tout lancement erroné hors session Wayland ou sur console TTY) et `Slice=session.slice`.
+- **Refonte et fiabilisation du paquet Arch Linux (`packaging/arch/PKGBUILD`)** :
+  - Suppression de l'appel invalide `systemctl enable --user` dans la fonction `package()` de makepkg.
+  - Installation statique conforme de l'unité de service dans `/usr/lib/systemd/user/hyprsmart.service` avec les permissions `0644`.
+  - Intégration de l'option de compilation `options=('!strip')` pour préserver l'intégrité des binaires et bibliothèques C dynamiques générées par PyInstaller.
+  - Nettoyage et exclusion git des artefacts de compilation makepkg (`pkg/`, `src/`, archives `.tar.gz`).
+- **Création du script d'installation automatisé universel (`install.sh`)** :
+  - Support de 3 modes d'installation : natif Arch Linux (`--arch`, `-a`), installation système globale (`--system`, `-s` vers `/opt/hyprsmart` et `/usr/bin/`), et installation locale utilisateur sans droits root (`--user`, `-u` vers `~/.local/share/hyprsmart` et `~/.local/bin/`).
+  - Prise en charge des flags `--enable` (activation et démarrage immédiat du service systemd utilisateur) et `--uninstall` (nettoyage complet des paquets, binaires et unités systemd).
+  - Contrôle préliminaire des dépendances de compilation (`uv`, `python3`) et d'exécution (`grim`, `hyprctl`).
+- **Ajout de l'indicateur de version CLI (`hyprsmart --version` / `-v`)** :
+  - Export standard de `__version__ = "0.8.6"` dans `hyprsmart/__init__.py`.
+  - Prise en charge des flags `-v` et `--version` dans le parseur d'arguments CLI principal (`cli.py`).
+  - Nouveau test unitaire validant le comportement de l'option `--version` (portant la suite à 65 tests validés).
+
+---
+
 ## [0.8.5] - 2026-10-17
 
 ### Sécurité & Durcissement IPC (Fail-Closed & Intégrité Système)

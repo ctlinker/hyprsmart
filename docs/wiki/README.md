@@ -46,6 +46,10 @@ Explorez la mécanique interne et les démonstrations physiques qui éliminent l
    *Surveillance cadencée annulable (11 ticks, arrêt à 8 stables), court-circuit pixel $32 \times 32$, bascule de polarité et filtre anti-wobble / anti-hunting.*
 10. [**10. Modèle de Sécurité, Durcissement IPC & Bouclier de Confidentialité**](under-the-hood/10_security_model_and_privacy_shield.md)  
    *Authentification SO_PEERCRED, permissions de socket 0o600, protection contre les captures de fenêtres sensibles, bornage anti-DoS des files d'attente et validation des adresses.*
+11. [**11. Optimisation des Performances, Screencopy & Efficacité Énergétique**](under-the-hood/11_performance_optimization_and_resource_efficiency.md)  
+   *Accélération grim -l 0 -s 1 (gain 20x), table de correspondance sRGB LUT (gain 6x), élagage des tempêtes d'événements de titre et suppression du polling sur fenêtres statiques.*
+12. [**12. Architecture de Packaging & Intégration Démon systemd**](under-the-hood/12_packaging_and_systemd_daemon.md)  
+   *Empaquetage natif Arch Linux PKGBUILD, résolution du piège multi-user.target vs graphical-session.target, garde-fous Wayland et script universel install.sh.*
 
 Consultez également les [**Archives**](under-the-hood/archives/README.md) pour découvrir les technologies explorées puis retirées (ex: le prototype initial Vision-LLM).
 
@@ -59,4 +63,4 @@ Conformément à la charte [`AGENT.md`](../AGENT.md), chaque intervention techni
 - Les solutions algorithmiques retenues et leur implémentation,
 - Les résultats des suites de tests unitaires et les fichiers modifiés.
 
-Consultez [**`wiki/reports/README.md`**](reports/README.md) pour parcourir l'historique de navigation des 20+ sessions de développement.
+Consultez [**`docs/wiki/reports/README.md`**](reports/README.md) pour parcourir l'historique de navigation des sessions de développement.

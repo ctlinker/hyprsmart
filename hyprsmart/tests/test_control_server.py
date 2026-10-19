@@ -21,6 +21,17 @@ class TestControlServer(unittest.TestCase):
         finally:
             server.stop()
 
+    def test_version_flag(self):
+        from hyprsmart import __version__
+        from hyprsmart.cli import VERSION, build_parser
+
+        self.assertEqual(__version__, VERSION)
+        self.assertEqual(__version__, "0.8.6")
+        parser = build_parser()
+        with self.assertRaises(SystemExit) as cm:
+            parser.parse_args(["--version"])
+        self.assertEqual(cm.exception.code, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

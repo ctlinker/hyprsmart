@@ -7,6 +7,8 @@ Ce dossier rassemble les comptes-rendus systématiques des interventions de dév
 ## 1. Sommaire Thématique par Jalon
 
 ### Jalon v0.8.x — Réévaluation Progressive, Anti-Wobble & Durcissement Sécurité
+- [**2026-10-19 — Packaging Arch Linux, résolution démon systemd & installateur universel (`v0.8.6`)**](2026-10-19_packaging_arch_linux_et_service_systemd.md)  
+  *Diagnostic de l'absence de démarrage (multi-user.target vs graphical-session.target), packaging PKGBUILD, installateur automatisé install.sh et drapeau CLI --version.*
 - [**2026-10-17 — Durcissement IPC, SO_PEERCRED fail-closed & intégrité système (`v0.8.5`)**](2026-10-17_durcissement_ipc_et_credentials_fail_closed.md)  
   *Authentification SO_PEERCRED fail-closed, vérification d'appartenance UID sur socket et runtime, écriture atomique du PID 0600 et isolation des logs 0700.*
 - [**2026-10-17 — Fusion vers `dev` des optimisations de performances & réduction CPU (`v0.8.4`)**](2026-10-17_fusion_dev_optimisations_performances.md)  

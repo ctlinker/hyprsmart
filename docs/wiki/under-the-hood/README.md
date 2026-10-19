@@ -51,6 +51,8 @@ Chaque document explore en profondeur un pilier technique :
    *Authentification SO_PEERCRED, permissions de socket 0o600, protection contre les captures de fenêtres sensibles, bornage anti-DoS des files d'attente et validation des adresses.*
 11. [**11. Optimisation des Performances, Screencopy & Efficacité Énergétique**](11_performance_optimization_and_resource_efficiency.md)
    *Accélération grim -l 0 -s 1 (gain 20x), table de correspondance sRGB LUT (gain 6x), élagage des tempêtes d'événements de titre et suppression du polling sur fenêtres statiques.*
+12. [**12. Architecture de Packaging & Intégration Démon systemd**](12_packaging_and_systemd_daemon.md)
+   *Empaquetage natif Arch Linux PKGBUILD, résolution du piège multi-user.target vs graphical-session.target, garde-fous Wayland et script universel install.sh.*
 
 
 ---

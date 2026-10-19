@@ -1,12 +1,16 @@
 [Unit]
-Description=HyprSmart adaptive window transparency
-After=graphical.target
+Description=HyprSmart - Adaptive window transparency for Hyprland
+Documentation=https://github.com/ctlinker/hyprsmart
+PartOf=graphical-session.target
+After=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/hyprsmart start --foreground
 Restart=on-failure
 RestartSec=2
+Slice=session.slice
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=graphical-session.target
