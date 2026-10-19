@@ -91,3 +91,19 @@ Pour offrir une installation robuste en une seule commande en dehors d'Arch Linu
 - **`--enable`** : Exécute immédiatement `systemctl --user daemon-reload` et `systemctl --user enable --now hyprsmart.service`, puis affiche le statut du démon.
 - **`--uninstall`** : Détecte le type d'installation (paquet `pacman`, fichiers `/opt`, ou fichiers `~/.local`), arrête le service, supprime les unités et nettoie les répertoires.
 - **Validation des Dépendances** : Vérifie en amont la présence des outils de compilation (`uv`, `python3`) et avertit si les composants d'exécution (`hyprctl`, `grim`) sont absents.
+
+---
+
+## 4. Installateur Git en Ligne en Une Ligne (`install-git.sh`)
+
+Pour permettre une installation directe via `curl -fSsL .../install-git.sh | bash` sans clonage manuel préalable, le script `install-git.sh` implémente :
+
+1. **Reconnexion TTY (`exec < /dev/tty`)** : Lorsque le script est injecté via un tube (*pipe*) depuis curl, l'entrée standard `stdin` est accaparée par bash pour lire le script. La reconnexion conditionnelle à `/dev/tty` permet aux commandes interactives (telles que les demandes de mot de passe `sudo` ou les invites `pacman`) d'interagir normalement avec l'utilisateur.
+2. **Détection Automatique de la Dernière Release** :
+   ```bash
+   git ls-remote --tags --refs "${REPO_URL}" | awk '{print $2}' | sed 's|^refs/tags/||' | sort -V | tail -n 1
+   ```
+   Interroge les étiquettes distantes sans cloner l'historique complet et sélectionne la version SemVer la plus récente.
+3. **Clonage Éphémère et Sécurisé** : Clonant superficiellement (`--depth 1 --branch <tag>`) dans un répertoire temporaire `mktemp -d`, nettoyé automatiquement à la sortie via `trap ... EXIT`.
+4. **Délégation d'Arguments** : Transmet automatiquement les arguments optionnels à `install.sh` ou applique `--enable` par défaut.
+

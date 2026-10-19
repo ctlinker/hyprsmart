@@ -18,9 +18,10 @@
 
 ## Why HyprSmart?
 
-Hyprland's window transparency looks fantastic—until a bright wallpaper makes your terminal or code editor impossible to read, or a dark video gets washed out. 
+Hyprland's window transparency looks fantastic—until a bright wallpaper makes your terminal or code editor impossible to read, or a dark video gets washed out.
 
 Constantly toggling opacity manually breaks your focus. **HyprSmart** runs quietly in the background as a lightweight daemon:
+
 - It monitors the window you are working in.
 - It samples the exact area of wallpaper behind that window.
 - It dynamically computes and applies the ideal opacity level so that your text remains crisp and readable, adhering to **WCAG contrast standards**.
@@ -42,31 +43,38 @@ No screen flashes. No heavy AI models. Just instant, beautiful, and readable tra
 
 ## Installation
 
-### Arch Linux (Recommended)
+### Quick Install (One-Liner)
 
-Clone the repository and run the automated installer:
+Install the latest release and enable the systemd service in one command:
+
+```bash
+curl -fSsL https://raw.githubusercontent.com/ctlinker/hyprsmart/main/install-git.sh | bash
+```
+
+> **What this does**: Automatically detects the latest release tag from GitHub, clones it into a secure temporary directory, installs the package (using native `makepkg` on Arch Linux or standalone binaries), enables the systemd user service, and cleans up after itself.
+
+---
+
+### Manual Installation (Local Clone)
+
+You can also clone the repository and run the installer locally:
 
 ```bash
 git clone https://github.com/ctlinker/hyprsmart.git
 cd hyprsmart
+
+# Arch Linux package (makepkg) + systemd autostart:
 ./install.sh --arch --enable
-```
 
-> **Tip**: This builds the native Arch package via `makepkg` and immediately enables the systemd user service.
-
-### Other Distributions / Manual Install
-
-The universal installer also supports system-wide and user-level installations:
-
-```bash
-# System-wide installation (/opt/hyprsmart + /usr/bin/hyprsmart)
+# System-wide installation (/opt/hyprsmart + /usr/bin/hyprsmart):
 ./install.sh --system --enable
 
-# User-level installation (~/.local/bin) without sudo
+# User-level installation (~/.local/bin) without sudo:
 ./install.sh --user --enable
 ```
 
 To uninstall at any time:
+
 ```bash
 ./install.sh --uninstall
 ```
@@ -76,6 +84,7 @@ To uninstall at any time:
 ## Autostart
 
 ### Option A: systemd User Service (Recommended)
+
 If you didn't pass `--enable` during installation, enable and start the service with:
 
 ```bash
@@ -83,6 +92,7 @@ systemctl --user enable --now hyprsmart.service
 ```
 
 ### Option B: Hyprland Config (`hyprland.conf`)
+
 Alternatively, add this line to `~/.config/hypr/hyprland.conf`:
 
 ```ini

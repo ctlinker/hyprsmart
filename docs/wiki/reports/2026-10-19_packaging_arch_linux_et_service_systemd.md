@@ -110,6 +110,12 @@ Création d'un script bash interactif et non-interactif supportant :
 - Synchronisation des versions dans `pyproject.toml`, `uv.lock` et `PKGBUILD`.
 - Ajout d'un test unitaire dans `test_control_server.py` validant l'option CLI `--version`.
 
+### 3.5 Installateur Git en Ligne Direct (`install-git.sh`)
+- Permet l'installation en une seule ligne de commande via tube curl : `curl -fSsL https://raw.githubusercontent.com/ctlinker/hyprsmart/main/install-git.sh | bash`.
+- Interroge les étiquettes de version distantes avec `git ls-remote --tags --refs` et résout dynamiquement la dernière version (ou repli sur les branches actives).
+- Clone superficiellement dans un environnement temporaire sécurisé (`mktemp -d`) nettoyé par `trap EXIT`.
+- Redirection ciblée de `/dev/tty` vers `./install.sh` permettant les saisies interactives de mot de passe `sudo`/`pacman` lors de l'exécution en tube.
+
 ---
 
 ## 4. Documentation Technique Réalisée

@@ -18,6 +18,11 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
   - Support de 3 modes d'installation : natif Arch Linux (`--arch`, `-a`), installation système globale (`--system`, `-s` vers `/opt/hyprsmart` et `/usr/bin/`), et installation locale utilisateur sans droits root (`--user`, `-u` vers `~/.local/share/hyprsmart` et `~/.local/bin/`).
   - Prise en charge des flags `--enable` (activation et démarrage immédiat du service systemd utilisateur) et `--uninstall` (nettoyage complet des paquets, binaires et unités systemd).
   - Contrôle préliminaire des dépendances de compilation (`uv`, `python3`) et d'exécution (`grim`, `hyprctl`).
+- **Installateur Git en ligne à exécution directe (`install-git.sh`)** :
+  - Permet l'installation en une seule commande via tube curl (`curl -fSsL .../install-git.sh | bash`).
+  - Détection automatique et résolution de la dernière version étiquetée (*latest tag*) via `git ls-remote --tags`.
+  - Clonage éphémère et sécurisé (`--depth 1`) dans un répertoire temporaire nettoyé automatiquement par `trap EXIT`.
+  - Reconnexion transparente de `/dev/tty` pour les saisies interactives (mots de passe `sudo`/`pacman`) et transmission automatique des paramètres ou activation par défaut (`--enable`).
 - **Ajout de l'indicateur de version CLI (`hyprsmart --version` / `-v`)** :
   - Export standard de `__version__ = "0.8.6"` dans `hyprsmart/__init__.py`.
   - Prise en charge des flags `-v` et `--version` dans le parseur d'arguments CLI principal (`cli.py`).
