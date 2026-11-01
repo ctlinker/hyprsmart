@@ -159,4 +159,4 @@ Looking for the mathematical formulas, architectural diagrams, developer flags, 
 
 ## License
 
-Distributed under the [MIT License](LICENSE).
+Distributed under the [Apache-2.0](LICENSE).
